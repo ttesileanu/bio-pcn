@@ -278,3 +278,21 @@ def test_no_z_grad_for_input_and_output(net):
     # ensure gradient is zero for input and output layers
     for i in [0, -1]:
         assert net.z[i].grad is None
+
+
+def test_loss_function(net):
+    net.forward(torch.FloatTensor([0.2, -0.5, 0.3]))
+    loss = net.loss().item()
+
+    expected = 0
+    D = len(net.pyr_dims) - 2
+    for i in range(D):
+        err_apical = net.z[i + 2] - net.W_a[i] @ net.z[i + 1] - net.h_a[i]
+        apical = 0.5 * net.g_a[i] * torch.linalg.norm(err_apical) ** 2
+
+        err_basal = net.z[i + 1] - net.W_b[i] @ net.z[i] - net.h_b[i]
+        basal = 0.5 * net.g_b[i] * torch.linalg.norm(err_basal) ** 2
+
+        expected += (apical + basal).item()
+
+    assert loss == pytest.approx(expected)

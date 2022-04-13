@@ -211,7 +211,44 @@ class LinearCPCNetwork:
             self.a[i] = a_feedback - a_inter
 
     def loss(self) -> torch.Tensor:
-        return torch.FloatTensor([0])
+        """Estimate loss given current activation values.
+
+        This is defined as the predictive-coding loss with duplicated weights connecting
+        the hidden layers. Schematically,
+
+            loss = 0.5 * sum(g_a * (z[l + 1] - mu_a[l + 1]) ** 2 +
+                             g_b * (z[l] - mu_b[l]) ** 2))
+
+        where the sum is over the hidden layers, and the predictions `mu_a` and `mu_b`
+        are calculated using the apical and basal weights and biases, respectively:
+
+            mu_x[l + 1] = W_x[l] @ z[l] + h_x[l]
+
+        with `x` either `a` or `b`.
+
+        This loss is minimized whenever the predictive-coding loss is minimized. (That
+        is, at the minimum, `W_a == W_b`.)
+        """
+        res = torch.FloatTensor([0])
+
+        D = len(self.pyr_dims) - 2
+        norm = torch.linalg.norm
+        for i in range(D):
+            mu_a = self.W_a[i] @ self.z[i + 1]
+            if self.bias_a:
+                mu_a += self.h_a[i]
+            apical = self.g_a[i] * norm(self.z[i + 2] - mu_a) ** 2
+
+            mu_b = self.W_b[i] @ self.z[i]
+            if self.bias_b:
+                mu_b += self.h_b[i]
+            basal = self.g_b[i] * norm(self.z[i + 1] - mu_b) ** 2
+
+            res += apical + basal
+
+        res /= 2
+
+        return res
 
     def fast_parameters(self) -> list:
         """Create list of parameters to optimize in the fast phase.
