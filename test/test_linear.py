@@ -113,3 +113,168 @@ def test_all_z_not_none_after_forward(net):
 
     for z in net.z:
         assert z is not None
+
+
+def test_all_z_change_during_forward(net):
+    # set some starting values for x
+    net.forward(torch.FloatTensor([-0.2, 0.3, 0.1]))
+
+    old_z = [_.clone() for _ in net.z]
+    net.forward(torch.FloatTensor([0.3, -0.4, 0.2]))
+
+    for old, new in zip(old_z, net.z):
+        assert not torch.any(torch.isclose(old, new))
+
+
+def test_forward_constrained_starts_with_forward(net):
+    x = torch.FloatTensor([-0.1, 0.2, 0.4])
+
+    net.z_it = 0
+    net.forward_constrained(x, torch.FloatTensor([0.3, -0.4]))
+
+    old_z = [_.clone() for _ in net.z]
+    net.forward(x)
+
+    for old, new in zip(old_z[:-1], net.z[:-1]):
+        assert torch.all(torch.isclose(old, new))
+
+
+def test_all_z_not_none_after_forward_constrained(net):
+    net.forward_constrained(
+        torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4])
+    )
+
+    for z in net.z:
+        assert z is not None
+
+
+def test_all_z_change_during_forward_constrained(net):
+    # set some starting values for x
+    net.forward(torch.FloatTensor([-0.2, 0.3, 0.1]))
+
+    old_z = [_.clone() for _ in net.z]
+    net.forward_constrained(
+        torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4])
+    )
+
+    for old, new in zip(old_z, net.z):
+        assert not torch.all(torch.isclose(old, new))
+
+
+def test_interneuron_current_calculation(net):
+    net.forward(torch.FloatTensor([-0.3, 0.1, 0.4]))
+    net.calculate_currents()
+
+    D = len(net.pyr_dims) - 2
+    for i in range(D):
+        expected = net.Q[i] @ net.z[i + 1]
+        assert torch.all(torch.isclose(net.n[i], expected))
+
+
+def test_basal_current_calculation(net):
+    net.forward(torch.FloatTensor([-0.3, 0.1, 0.4]))
+    net.calculate_currents()
+
+    D = len(net.pyr_dims) - 2
+    for i in range(D):
+        expected = net.W_b[i] @ net.z[i] + net.h_b[i]
+        assert torch.all(torch.isclose(net.b[i], expected))
+
+
+def test_basal_current_calculation_no_bias(net_no_bias_b):
+    net = net_no_bias_b
+    net.forward(torch.FloatTensor([-0.3, 0.1]))
+    net.calculate_currents()
+
+    D = len(net.pyr_dims) - 2
+    for i in range(D):
+        expected = net.W_b[i] @ net.z[i]
+        assert torch.all(torch.isclose(net.b[i], expected))
+
+
+def test_apical_current_calculation(net):
+    net.forward(torch.FloatTensor([-0.3, 0.1, 0.4]))
+    net.calculate_currents()
+
+    D = len(net.pyr_dims) - 2
+    for i in range(D):
+        expected = net.W_a[i].T @ (net.z[i + 2] - net.h_a[i]) - net.Q[i].T @ net.n[i]
+        assert torch.all(torch.isclose(net.a[i], expected))
+
+
+def test_apical_current_calculation_no_bias(net):
+    net.forward(torch.FloatTensor([-0.3, 0.1, 0.4]))
+    net.calculate_currents()
+
+    D = len(net.pyr_dims) - 2
+    for i in range(D):
+        expected = net.W_a[i].T @ net.z[i + 2] - net.Q[i].T @ net.n[i]
+        assert torch.all(torch.isclose(net.a[i], expected))
+
+
+@pytest.mark.parametrize("which", ["W_a", "W_b", "Q", "M"])
+def test_initial_params_same_when_torch_seed_is_same(which: str):
+    seed = 321
+    dims = [2, 6, 5, 3]
+
+    torch.manual_seed(seed)
+    net = LinearCPCNetwork(dims)
+
+    old = [_.clone().detach() for _ in getattr(net, which)]
+
+    torch.manual_seed(seed)
+    net = LinearCPCNetwork(dims)
+
+    new = [_.clone().detach() for _ in getattr(net, which)]
+
+    for crt_old, crt_new in zip(old, new):
+        assert torch.allclose(crt_old, crt_new)
+
+
+@pytest.mark.parametrize("which", ["W_a", "W_b", "Q", "M"])
+def test_initial_params_change_for_subsequent_calls_if_seed_not_reset(which: str):
+    seed = 321
+    dims = [2, 6, 5, 3]
+
+    torch.manual_seed(seed)
+    net = LinearCPCNetwork(dims)
+
+    old = [_.clone().detach() for _ in getattr(net, which)]
+
+    net = LinearCPCNetwork(dims)
+    new = [_.clone().detach() for _ in getattr(net, which)]
+
+    for crt_old, crt_new in zip(old, new):
+        assert not torch.any(torch.isclose(crt_old, crt_new))
+
+
+def test_initial_biases_are_zero(net):
+    for h in net.h_a + net.h_b:
+        assert torch.all(torch.isclose(h, torch.FloatTensor([0])))
+
+
+def test_z_grad(net):
+    net.forward(torch.FloatTensor([0.2, -0.5, 0.3]))
+    net.calculate_currents()
+    net.calculate_z_grad()
+
+    D = len(net.pyr_dims) - 2
+    for i in range(D):
+        hidden_apical = net.g_a[i] * net.a[i]
+        hidden_basal = net.g_b[i] * net.b[i]
+        hidden_lateral = net.c_m[i] * net.M[i] @ net.z[i + 1]
+        hidden_leak = net.l_s[i] * net.z[i + 1]
+
+        expected = hidden_apical + hidden_basal - hidden_lateral - hidden_leak
+
+        assert torch.all(torch.isclose(net.z[i + 1].grad, expected))
+
+
+def test_no_z_grad_for_input_and_output(net):
+    net.forward(torch.FloatTensor([0.2, -0.5, 0.3]))
+    net.calculate_currents()
+    net.calculate_z_grad()
+
+    # ensure gradient is zero for input and output layers
+    for i in [0, -1]:
+        assert net.z[i].grad is None

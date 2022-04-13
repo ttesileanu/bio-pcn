@@ -1,8 +1,9 @@
 """ Define the linear constrained-predictive coding network. """
 
-from typing import Sequence, Union, Optional
+from typing import Sequence, Union, Optional, Callable
 
 import torch
+import torch.nn as nn
 
 import numpy as np
 
@@ -22,6 +23,7 @@ class LinearCPCNetwork:
         c_m: Union[Sequence, float] = 1.0,
         bias_a: bool = True,
         bias_b: bool = True,
+        fast_optimizer: Optional[Callable] = None,
     ):
         """Initialize the network.
 
@@ -36,6 +38,8 @@ class LinearCPCNetwork:
         :param c_m: strength of lateral connections
         :param bias_a: whether to have bias terms at the apical end
         :param bias_b: whether to have bias terms at the basal end
+        :param fast_optimizer: constructor for the optimizer used for the fast dynamics
+            in `forward_constrained`; by default this is `SGD`
         """
         self.training = True
 
@@ -58,6 +62,11 @@ class LinearCPCNetwork:
 
         self.bias_a = bias_a
         self.bias_b = bias_b
+
+        if fast_optimizer is not None:
+            self.fast_optimizer = fast_optimizer
+        else:
+            self.fast_optimizer = torch.optim.SGD
 
         # create network parameters
         # weights and biases
@@ -85,18 +94,6 @@ class LinearCPCNetwork:
         self._initialize_interlayer_weights()
         self._initialize_intralayer_weights()
         self._initialize_biases()
-
-        # self.W = [
-        #     torch.Tensor(self.dims[i + 1], self.dims[i])
-        #     for i in range(len(self.dims) - 1)
-        # ]
-        # self.b = [
-        #     torch.zeros(self.dims[i + 1], requires_grad=True)
-        #     for i in range(len(self.dims) - 1)
-        # ]
-        # for W in self.W:
-        #     nn.init.xavier_uniform_(W)
-        #     W.requires_grad = True
 
         # create neural variables
         self.a = [None for _ in self.inter_dims]
@@ -131,23 +128,129 @@ class LinearCPCNetwork:
         self.z = z
         return x
 
+    def forward_constrained(
+        self, x: torch.Tensor, y: torch.Tensor, loss_profile: bool = False
+    ) -> Optional[Sequence]:
+        """Do a forward pass where both input and output values are fixed.
+
+        This runs a number of iterations (as set by `self.z_it`) of the fast optimizer,
+        starting with an initialization where the input is propagated forward without an
+        output constraint (using `self.forward`).
+
+        :param x: input sample
+        :param y: output sample
+        :param loss_profile: if true, evaluates and returns the loss at every step; see
+            `LinearCPCNetwork.loss`
+        :return: if `loss_profile` is true, loss evaluated before every optimization
+            step; otherwise, `None`
+        """
+        # we calculate gradients manually
+        with torch.no_grad():
+            # start with a simple forward pass to initialize the layer values
+            self.forward(x)
+
+            # fix the output layer values
+            # noinspection PyTypeChecker
+            self.z[-1] = y
+
+            # create an optimizer for the fast parameters
+            fast_optimizer = self.fast_optimizer(self.fast_parameters(), lr=self.z_lr)
+
+            # iterate until convergence
+            if loss_profile:
+                losses = np.zeros(self.z_it)
+            for i in range(self.z_it):
+                self.calculate_currents()
+                self.calculate_z_grad()
+                fast_optimizer.step()
+
+                if loss_profile:
+                    losses[i] = self.loss().item()
+
+        if loss_profile:
+            return losses
+
+    def calculate_z_grad(self):
+        """Calculate gradients for fast (z) variables.
+
+        This assumes that the currents were calculated using `calculate_currents`. The
+        calculated gradients are assigned to the `grad` attribute.
+        """
+        D = len(self.pyr_dims) - 2
+        for i in range(D):
+            grad_apical = self.g_a[i] * self.a[i]
+            grad_basal = self.g_b[i] * self.b[i]
+            grad_lateral = self.c_m[i] * self.M[i] @ self.z[i + 1]
+            grad_leak = self.l_s[i] * self.z[i + 1]
+
+            self.z[i + 1].grad = grad_apical + grad_basal - grad_lateral - grad_leak
+
+        self.z[0].grad = None
+        self.z[-1].grad = None
+
+    def calculate_currents(self):
+        """Calculate apical, basal, and interneuron currents in all layers.
+
+        Note that this relies on valid `z` values being available in `self.z`. This
+        might require running `self.forward`.
+        """
+        D = len(self.pyr_dims) - 2
+        for i in range(D):
+            self.n[i] = self.Q[i] @ self.z[i + 1]
+
+            if self.bias_b:
+                self.b[i] = self.W_b[i] @ self.z[i] + self.h_b[i]
+            else:
+                self.b[i] = self.W_b[i] @ self.z[i]
+
+            if self.bias_a:
+                a_feedback = self.W_a[i].T @ (self.z[i + 2] - self.h_a[i])
+            else:
+                a_feedback = self.W_a[i].T @ self.z[i + 2]
+            a_inter = self.Q[i].T @ self.n[i]
+            self.a[i] = a_feedback - a_inter
+
+    def loss(self) -> torch.Tensor:
+        return torch.FloatTensor([0])
+
+    def fast_parameters(self) -> list:
+        """Create list of parameters to optimize in the fast phase.
+
+        These are the activations in all the hidden layers.
+        """
+        return self.z[1:-1]
+
     def _initialize_interlayer_weights(self):
-        pass
+        for lst in [self.W_a, self.W_b]:
+            for W in lst:
+                nn.init.xavier_uniform_(W)
+                W.requires_grad = True
 
     def _initialize_intralayer_weights(self):
-        pass
+        for lst in [self.Q, self.M]:
+            for W in lst:
+                nn.init.xavier_uniform_(W)
+                W.requires_grad = True
 
     def _initialize_biases(self):
-        pass
+        all = []
+        if self.bias_a:
+            all += self.h_a
+        if self.bias_b:
+            all += self.h_b
+
+        for h in all:
+            h.zero_()
+            h.requires_grad = True
 
     def _expand_per_layer(self, theta) -> torch.Tensor:
         """Expand a quantity to per-layer, if needed, and convert to tensor."""
-        n = len(self.pyr_dims) - 1
+        D = len(self.pyr_dims) - 2
 
         if np.size(theta) > 1:
-            assert len(theta) == n
+            assert len(theta) == D
             theta = torch.from_numpy(theta)
         else:
-            theta = theta * torch.ones(n)
+            theta = theta * torch.ones(D)
 
         return theta
