@@ -5,7 +5,6 @@ attrs==21.2.0
 backcall==0.2.0
 bleach==3.3.0
 cffi==1.14.5
--e git+git@github.com:ttesileanu/bio-pcn.git@58e94237e49466613fbfada4d25e4581405f0598#egg=cpcn
 cycler==0.10.0
 decorator==5.0.7
 defusedxml==0.7.1
@@ -38,7 +37,6 @@ pandas==1.2.4
 pandocfilters==1.4.3
 parso==0.8.2
 patsy==0.5.1
--e git+git@github.com:ttesileanu/pcn.git@7807339a73a7f79de6892738837ecb6d70113c18#egg=pcn
 pexpect==4.8.0
 pickleshare==0.7.5
 Pillow==8.2.0
