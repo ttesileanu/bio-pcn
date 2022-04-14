@@ -7,7 +7,10 @@ import torch
 
 @pytest.fixture
 def net():
-    net = LinearCPCNetwork([3, 4, 5, 2])
+    # ensure non-trivial conductances
+    net = LinearCPCNetwork(
+        [3, 4, 5, 2], g_a=[0.4, 0.8], g_b=[1.2, 0.5], c_m=[0.3, 0.7], l_s=[2.5, 1.8]
+    )
     return net
 
 
@@ -267,7 +270,7 @@ def test_z_grad(net):
 
         expected = hidden_apical + hidden_basal - hidden_lateral - hidden_leak
 
-        assert torch.all(torch.isclose(net.z[i + 1].grad, expected))
+        assert torch.all(torch.isclose(net.z[i + 1].grad, -expected))
 
 
 def test_no_z_grad_for_input_and_output(net):
@@ -296,3 +299,100 @@ def test_loss_function(net):
         expected += (apical + basal).item()
 
     assert loss == pytest.approx(expected)
+
+
+def test_apical_weight_gradient(net):
+    net.g_a[0] = 1.0
+    net.g_a[1] = 1.0
+
+    x = torch.FloatTensor([0.2, -0.5, 0.3])
+    y = torch.FloatTensor([0.5, -0.3])
+    net.forward_constrained(x, y)
+    net.calculate_weight_grad()
+
+    D = len(net.pyr_dims) - 2
+    for i in range(D):
+        expected = torch.outer(net.z[i + 2] - net.h_a[i], net.z[i + 1]) - net.W_a[i]
+        assert torch.all(torch.isclose(net.W_a[i].grad, -expected))
+
+
+def test_apical_weight_gradient_scaling_with_apical_conductance(net):
+    net.g_a[0] = 1.0
+    net.g_a[1] = 1.0
+
+    x = torch.FloatTensor([0.2, -0.5, 0.3])
+    y = torch.FloatTensor([0.5, -0.3])
+    net.forward_constrained(x, y)
+    net.calculate_weight_grad()
+
+    old_W_a_grads = [_.grad.clone().detach() for _ in net.W_a]
+
+    # if i don't update any other variables, the delta W should be prop to g
+    net.g_a[0] = 0.5
+    net.g_a[1] = 1.3
+
+    net.calculate_weight_grad()
+
+    for old, new, g in zip(old_W_a_grads, net.W_a, net.g_a):
+        assert torch.all(torch.isfinite(new.grad))
+        assert torch.all(torch.isclose(new.grad, g * old))
+
+
+def test_basal_weight_gradient(net):
+    x = torch.FloatTensor([-0.4, 0.5, 0.3])
+    y = torch.FloatTensor([0.2, 0.3])
+    net.forward_constrained(x, y)
+    net.calculate_weight_grad()
+
+    D = len(net.pyr_dims) - 2
+    for i in range(D):
+        plateau = net.g_a[i] * torch.outer(net.a[i], net.z[i])
+        lateral = net.c_m[i] * net.M[i] @ net.z[i + 1]
+        self = (net.l_s[i] - net.g_b[i]) * net.z[i + 1]
+        hebbian = torch.outer(self + lateral, net.z[i])
+
+        assert torch.all(torch.isclose(-net.W_b[i].grad, plateau - hebbian))
+
+
+def test_interneuron_weight_gradient(net):
+    x = torch.FloatTensor([-0.4, 0.5, 0.3])
+    y = torch.FloatTensor([0.2, 0.3])
+    net.forward_constrained(x, y)
+    net.calculate_weight_grad()
+
+    D = len(net.pyr_dims) - 2
+    for i in range(D):
+        expected = torch.outer(net.n[i], net.z[i + 1]) - net.Q[i]
+        assert torch.all(torch.isclose(net.Q[i].grad, -net.g_a[i] * expected))
+
+
+def test_lateral_weight_gradient(net):
+    x = torch.FloatTensor([-0.4, 0.5, 0.3])
+    y = torch.FloatTensor([0.2, 0.3])
+    net.forward_constrained(x, y)
+    net.calculate_weight_grad()
+
+    D = len(net.pyr_dims) - 2
+    for i in range(D):
+        expected = torch.outer(net.z[i + 1], net.z[i + 1]) - net.M[i]
+        assert torch.all(torch.isclose(net.M[i].grad, -net.c_m[i] * expected))
+
+
+def test_on_shell_after_forward_constrained(net):
+    # i.e., z reaches stationarity
+    x = torch.FloatTensor([-0.4, 0.5, 0.3])
+    y = torch.FloatTensor([0.2, 0.3])
+    net.z_it = 1000
+    net.forward_constrained(x, y)
+
+    net.calculate_currents()
+
+    D = len(net.pyr_dims) - 2
+    for i in range(D):
+        apical = net.g_a[i] * net.a[i]
+        basal = net.g_b[i] * net.b[i]
+        lateral = net.c_m[i] * net.M[i] @ net.z[i + 1]
+        leak = net.l_s[i] * net.z[i + 1]
+        rhs = apical + basal - lateral - leak
+
+        assert torch.max(torch.abs(rhs)) < 1e-5

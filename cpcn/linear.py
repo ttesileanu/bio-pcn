@@ -16,7 +16,7 @@ class LinearCPCNetwork:
         pyr_dims: Sequence,
         inter_dims: Optional[Sequence] = None,
         z_it: int = 100,
-        z_lr: float = 0.2,
+        z_lr: float = 0.01,
         g_a: Union[Sequence, float] = 1.0,
         g_b: Union[Sequence, float] = 1.0,
         l_s: Union[Sequence, float] = 1.0,
@@ -170,11 +170,49 @@ class LinearCPCNetwork:
         if loss_profile:
             return losses
 
+    def calculate_weight_grad(self):
+        """Calculate gradients for slow (weight) variables.
+
+        This assumes that the fast variables have been calculated, using
+        `forward_constrained`. The calculated gradients are assigned the `grad`
+        attribute of each weight tensor.
+        """
+        D = len(self.pyr_dims) - 2
+        for i in range(D):
+            # apical
+            pre = self.z[i + 1]
+            if self.bias_a:
+                post = self.z[i + 2] - self.h_a[i]
+            else:
+                post = self.z[i + 2]
+            self.W_a[i].grad = self.g_a[i] * (self.W_a[i] - torch.outer(post, pre))
+
+            # basal
+            plateau = self.g_a[i] * self.a[i]
+            hebbian_self = (self.l_s[i] - self.g_b[i]) * self.z[i + 1]
+            hebbian_lateral = self.c_m[i] * self.M[i] @ self.z[i + 1]
+            hebbian = hebbian_self + hebbian_lateral
+
+            pre = self.z[i]
+            post = plateau - hebbian
+            self.W_b[i].grad = -torch.outer(post, pre)
+
+            # inter
+            pre = self.z[i + 1]
+            post = self.n[i]
+            self.Q[i].grad = self.g_a[i] * (self.Q[i] - torch.outer(post, pre))
+
+            # lateral
+            pre = self.z[i + 1]
+            post = pre
+            self.M[i].grad = self.c_m[i] * (self.M[i] - torch.outer(post, pre))
+
     def calculate_z_grad(self):
         """Calculate gradients for fast (z) variables.
 
         This assumes that the currents were calculated using `calculate_currents`. The
-        calculated gradients are assigned to the `grad` attribute.
+        calculated gradients are assigned to the `grad` attribute of each tensor in
+        `self.z`.
         """
         D = len(self.pyr_dims) - 2
         for i in range(D):
@@ -183,7 +221,7 @@ class LinearCPCNetwork:
             grad_lateral = self.c_m[i] * self.M[i] @ self.z[i + 1]
             grad_leak = self.l_s[i] * self.z[i + 1]
 
-            self.z[i + 1].grad = grad_apical + grad_basal - grad_lateral - grad_leak
+            self.z[i + 1].grad = grad_lateral + grad_leak - grad_apical - grad_basal
 
         self.z[0].grad = None
         self.z[-1].grad = None
@@ -286,7 +324,7 @@ class LinearCPCNetwork:
 
         if np.size(theta) > 1:
             assert len(theta) == D
-            theta = torch.from_numpy(theta)
+            theta = torch.from_numpy(np.asarray(theta))
         else:
             theta = theta * torch.ones(D)
 
