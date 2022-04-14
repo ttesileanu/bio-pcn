@@ -1,6 +1,7 @@
 import pytest
 
 from cpcn.linear import LinearCPCNetwork
+from cpcn.pcn import PCNetwork
 
 import torch
 
@@ -396,3 +397,56 @@ def test_on_shell_after_forward_constrained(net):
         rhs = apical + basal - lateral - leak
 
         assert torch.max(torch.abs(rhs)) < 1e-5
+
+
+@pytest.mark.parametrize("which", ["g_a", "g_b", "c_m", "l_s"])
+def test_allow_tensor_conductances_in_constructor(which):
+    kwargs = {which: torch.FloatTensor([1.3, 2.5])}
+    pcn = LinearCPCNetwork([2, 5, 4, 3], **kwargs)
+    assert getattr(pcn, which).shape == (2,)
+
+
+@pytest.mark.parametrize("which", ["g_a", "g_b", "c_m", "l_s"])
+def test_allow_scalar_tensor_conductances_in_constructor(which):
+    kwargs = {which: torch.FloatTensor([1.3])}
+    pcn = LinearCPCNetwork([2, 5, 4, 3], **kwargs)
+    assert getattr(pcn, which).shape == (2,)
+
+
+def test_cpcn_loss_matches_pcn_loss_with_appropriate_params():
+    torch.manual_seed(2)
+
+    dims = [2, 4, 3, 7, 3]
+    variances = [0.5, 1.2, 0.7, 0.3]
+
+    pcn = PCNetwork(dims, variances=variances, activation=lambda _: _)
+
+    # match CPCN conductances to PCN variances
+    variances = torch.FloatTensor(variances)
+    g_a = 0.5 / variances[1:]
+    g_b = 0.5 / variances[:-1]
+
+    g_a[-1] *= 2
+    g_b[0] *= 2
+    cpcn = LinearCPCNetwork(dims, g_a=g_a, g_b=g_b, c_m=0, l_s=g_b)
+
+    # match the weights
+    D = len(dims) - 2
+    for i in range(D):
+        cpcn.W_a[i] = pcn.W[i + 1].clone().detach()
+        cpcn.W_b[i] = pcn.W[i].clone().detach()
+
+    # pass some data through the network to set the neural activities
+    pcn.forward_constrained(
+        torch.FloatTensor([-0.3, 0.2]), torch.FloatTensor([0.4, -0.2, 0.5])
+    )
+
+    # copy the neural activations over to CPCN
+    for i in range(len(dims)):
+        cpcn.z[i] = pcn.x[i].clone().detach()
+
+    # now calculate and compare loss
+    pcn_loss = pcn.loss().item()
+    cpcn_loss = cpcn.loss().item()
+
+    assert pcn_loss == pytest.approx(cpcn_loss)
