@@ -322,7 +322,14 @@ class LinearCPCNetwork:
         """Expand a quantity to per-layer, if needed, and convert to tensor."""
         D = len(self.pyr_dims) - 2
 
-        if np.size(theta) > 1:
+        if torch.is_tensor(theta):
+            assert theta.ndim == 1
+            if len(theta) > 1:
+                assert len(theta) == D
+                theta = theta.clone()
+            else:
+                theta = theta * torch.ones(D)
+        elif np.size(theta) > 1:
             assert len(theta) == D
             theta = torch.from_numpy(np.asarray(theta))
         else:
