@@ -1,0 +1,18 @@
+channels:
+- defaults
+dependencies:
+ - python>3.7
+ - pytorch::pytorch=1.9.0
+ - pytorch::torchvision=0.10.0
+ - pytorch::torchaudio=0.9.0
+ - numpy
+ - tqdm
+ - pandas
+ - scipy
+ - matplotlib
+ - seaborn
+ - ipykernel
+ - pip
+ - pytest
+ - pip:
+   - pydove
