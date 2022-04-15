@@ -1,18 +1,18 @@
 channels:
 - defaults
 dependencies:
- - python>3.7
- - pytorch::pytorch=1.9.0
- - pytorch::torchvision=0.10.0
- - pytorch::torchaudio=0.9.0
+ - python=3.9
+ - pip
+ - black
+ - pytest
  - numpy
- - tqdm
- - pandas
  - scipy
+ - pandas
  - matplotlib
  - seaborn
+ - pytorch::pytorch
+ - pytorch::torchvision
+ - tqdm
  - ipykernel
- - pip
- - pytest
  - pip:
    - pydove
