@@ -179,3 +179,19 @@ class PCNetwork(object):
         These are the random variables in all but the input and output layers.
         """
         return self.x[1:-1]
+
+    def __str__(self) -> str:
+        s = f"PCNetwork(dims={str(self.dims)}, activation={str(self.activation)})"
+        return s
+
+    def __repr__(self) -> str:
+        s = (
+            f"PCNetwork("
+            f"dims={repr(self.dims)}, "
+            f"activation={repr(self.activation)}, "
+            f"it_inference={self.it_inference}, "
+            f"lr_inference={self.lr_inference}, "
+            f"variances={self.variances}"
+            f")"
+        )
+        return s

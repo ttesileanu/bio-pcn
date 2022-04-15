@@ -425,3 +425,17 @@ def test_forward_constrained_returns_sequence_with_last_elem_smaller_than_first(
 
 def test_to_returns_self(net):
     assert net.to(torch.device("cpu")) is net
+
+
+def test_repr(net):
+    s = repr(net)
+
+    assert s.startswith("PCNetwork(")
+    assert s.endswith(")")
+
+
+def test_str(net):
+    s = str(net)
+
+    assert s.startswith("PCNetwork(")
+    assert s.endswith(")")
