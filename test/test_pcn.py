@@ -27,13 +27,13 @@ def test_x_sizes(net):
     assert [len(_) for _ in net.x] == [3, 4, 2]
 
 
-def test_all_xs_not_none_after_forward_constrained(net):
+def test_all_xs_nonzero_after_forward_constrained(net):
     net.forward_constrained(
         torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4])
     )
 
     for x in net.x:
-        assert x is not None
+        assert torch.max(torch.abs(x)) > 1e-4
 
 
 def test_all_xs_change_during_forward_constrained(net):
@@ -49,11 +49,11 @@ def test_all_xs_change_during_forward_constrained(net):
         assert not torch.all(torch.isclose(old, new))
 
 
-def test_all_xs_not_none_after_forward(net):
+def test_all_xs_not_nonzero_after_forward(net):
     net.forward(torch.FloatTensor([0.3, -0.4, 0.2]))
 
     for x in net.x:
-        assert x is not None
+        assert torch.max(torch.abs(x)) > 1e-4
 
 
 def test_all_xs_change_during_forward(net):
@@ -297,108 +297,6 @@ def test_learning_effects_are_different_for_subsequent_runs():
         assert not torch.allclose(old, new)
 
 
-@pytest.fixture
-def trained_current_and_ref() -> tuple:
-    from pcn_ref import PCNetworkRef
-
-    seed = 100
-    dims = [2, 6, 5, 3]
-    variances = [0.5, 1.5, 2.7]
-    lr = 0.2
-
-    x = torch.FloatTensor([[0.2, -0.3], [0.5, 0.7], [-0.3, 0.2]])
-    y = torch.FloatTensor([[-0.5, 0.2, 0.7], [1.5, 0.6, -0.3], [-0.2, 0.5, 0.6]])
-
-    # do some learning
-    torch.manual_seed(seed)
-    net = PCNetwork(dims, variances=variances)
-
-    weights0 = [_.clone().detach() for _ in net.W]
-    biases0 = [_.clone().detach() for _ in net.b]
-
-    # the Whittington&Bogacz implementation inexplicably multiplies the learning rates
-    # by the output-layer variance
-    optimizer = torch.optim.SGD(net.slow_parameters(), lr=lr * variances[-1])
-    for crt_x, crt_y in zip(x, y):
-        net.forward_constrained(crt_x, crt_y)
-
-        optimizer.zero_grad()
-        net.loss().backward()
-        optimizer.step()
-
-    net_ref = PCNetworkRef(dims, variances=variances, lr=lr)
-
-    # do some learning
-    torch.manual_seed(seed)
-    net_ref.reset()
-
-    # ensure matching weights and biases
-    for i, (crt_W, crt_b) in enumerate(zip(weights0, biases0)):
-        net_ref.W[i][:] = crt_W
-        net_ref.b[i][:] = crt_b
-
-    for crt_x, crt_y in zip(x, y):
-        net_ref.learn(crt_x, crt_y)
-
-    return net, net_ref
-
-
-def test_compare_forward_result_after_learning_to_ref_impl(trained_current_and_ref):
-    net, net_ref = trained_current_and_ref
-
-    test_x = torch.FloatTensor([0.5, 0.2])
-
-    out = net.forward(test_x)
-    out_ref = net_ref.forward(test_x)
-
-    assert torch.allclose(out, out_ref)
-
-
-def test_compare_weights_after_learning_to_ref_impl(trained_current_and_ref):
-    net, net_ref = trained_current_and_ref
-
-    for new_W, new_b, W, b in zip(net.W, net.b, net_ref.W, net_ref.b):
-        assert torch.allclose(new_W, W, atol=1e-7, rtol=1e-4)
-        assert torch.allclose(new_b, b, atol=1e-7, rtol=1e-4)
-
-
-def test_forward_constrained_with_nontrivial_variances_vs_ref_impl():
-    from pcn_ref import PCNetworkRef
-
-    seed = 100
-    dims = [2, 6, 5, 3]
-    variances = [0.5, 1.5, 2.7]
-
-    x = torch.FloatTensor([0.2, -0.3])
-    y = torch.FloatTensor([-0.5, 0.2, 0.7])
-
-    # do some learning
-    torch.manual_seed(seed)
-    net = PCNetwork(dims, variances=variances)
-
-    weights0 = [_.clone().detach() for _ in net.W]
-    biases0 = [_.clone().detach() for _ in net.b]
-
-    net.forward_constrained(x, y)
-
-    # now the reference implementation
-    net_ref = PCNetworkRef(dims, variances=variances)
-
-    torch.manual_seed(seed)
-    net_ref.reset()
-
-    # ensure matching weights and biases
-    for i, (crt_W, crt_b) in enumerate(zip(weights0, biases0)):
-        net_ref.W[i][:] = crt_W
-        net_ref.b[i][:] = crt_b
-
-    net_ref.forward(x)
-    net_ref.infer(y)
-
-    for crt_x, crt_x_ref in zip(net.x, net_ref.x):
-        assert torch.allclose(crt_x, crt_x_ref)
-
-
 def test_training_with_batches_of_size_one():
     seed = 100
     dims = [2, 6, 5, 3]
@@ -523,3 +421,7 @@ def test_forward_constrained_returns_sequence_with_last_elem_smaller_than_first(
     )
 
     assert losses[-1] < losses[0]
+
+
+def test_to_returns_self(net):
+    assert net.to(torch.device("cpu")) is net

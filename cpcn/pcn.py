@@ -62,7 +62,7 @@ class PCNetwork(object):
             nn.init.xavier_uniform_(W)
             W.requires_grad = True
 
-        self.x = [None for _ in self.dims]
+        self.x = [torch.zeros(dim) for dim in self.dims]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """ Do a forward pass with unconstrained output.
@@ -73,14 +73,13 @@ class PCNetwork(object):
         :param x: input sample
         :returns: activation at output (last) layer
         """
-        xs = [x]
+        self.x[0] = x
         for i in range(len(self.dims) - 1):
             x = self.activation[i](x)
             x = x @ self.W[i].T + self.b[i]
 
-            xs.append(x)
+            self.x[i + 1] = x
 
-        self.x = xs
         return x
 
     def forward_constrained(self, x: torch.Tensor, y: torch.Tensor) -> Sequence:
@@ -164,6 +163,8 @@ class PCNetwork(object):
         for parameters in [self.slow_parameters(), self.fast_parameters()]:
             for param in parameters:
                 param.to(*args, **kwargs)
+
+        return self
 
     def slow_parameters(self) -> list:
         """ Create list of parameters to optimize in the slow phase.
