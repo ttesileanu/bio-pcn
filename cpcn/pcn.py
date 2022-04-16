@@ -160,9 +160,13 @@ class PCNetwork(object):
 
     def to(self, *args, **kwargs):
         """ Moves and/or casts the parameters and buffers. """
-        for parameters in [self.slow_parameters(), self.fast_parameters()]:
-            for param in parameters:
-                param.to(*args, **kwargs)
+        with torch.no_grad():
+            for i in range(len(self.W)):
+                self.W[i] = self.W[i].to(*args, **kwargs).requires_grad_()
+                self.b[i] = self.b[i].to(*args, **kwargs).requires_grad_()
+
+            for i in range(len(self.x)):
+                self.x[i] = self.x[i].to(*args, **kwargs)
 
         return self
 
