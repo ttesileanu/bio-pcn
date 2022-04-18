@@ -104,6 +104,11 @@ train_losses = np.zeros((n_epochs, len(train_loader)))
 
 optimizer = torch.optim.Adam(net.slow_parameters(), lr=0.001)
 
+# train a linear classifier on the output from the last hidden layer
+classifier = torch.nn.Sequential(torch.nn.Linear(*dims[-2:]))
+classifier_optimizer = torch.optim.Adam(classifier.parameters(), lr=0.001)
+classifier_criterion = torch.nn.MSELoss()
+
 # pbar = tqdm(range(n_epochs), desc="val: loss ?.??? acc ?.??")
 pbar = tqdm(range(n_epochs))
 for epoch in pbar:
@@ -111,22 +116,32 @@ for epoch in pbar:
     for i, (x, y) in enumerate(train_loader):
         net.forward_constrained(x, y)
 
+        classifier_optimizer.zero_grad()
         optimizer.zero_grad()
+
         loss = net.loss()
         loss.backward()
 
+        # propagate through the classifier
+        classifier_out = classifier(net.x[-2])
+        classifier_loss = classifier_criterion(classifier_out, y)
+        classifier_loss.backward()
+
         optimizer.step()
+        classifier_optimizer.step()
 
         train_losses[epoch, i] = loss.item()
 
     # evaluate
-    losses[epoch], accuracies[epoch] = evaluate(net, validation_loader)
+    losses[epoch], accuracies[epoch] = evaluate(
+        net, validation_loader, classifier=classifier
+    )
     # pbar.set_description(f"val: loss {losses[epoch]:.2g} acc {accuracies[epoch]:.2f}")
     pbar.set_postfix(
         {"val_loss": f"{losses[epoch]:.2g}", "val_acc": f"{accuracies[epoch]:.2f}"}
     )
 
-train_losses = np.mean(train_losses, axis=1)
+train_losses = np.sum(train_losses, axis=1) / len(train_loader.dataset)
 
 # %% [markdown]
 # ## Show learning curves
@@ -148,8 +163,8 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
 # ## Train CPCN
 
 # %%
-z_it = 50
-z_lr = 0.1
+z_it = 100
+z_lr = 0.05
 
 torch.manual_seed(123)
 
@@ -172,6 +187,11 @@ cpcn_train_losses = np.zeros((n_epochs, len(train_loader)))
 
 cpcn_optimizer = torch.optim.Adam(cpcn_net.slow_parameters(), lr=0.001)
 
+# train a linear classifier on the output from the last hidden layer
+cpcn_classifier = torch.nn.Sequential(torch.nn.Linear(*dims[-2:]))
+cpcn_classifier_optimizer = torch.optim.Adam(cpcn_classifier.parameters(), lr=0.001)
+cpcn_classifier_criterion = torch.nn.MSELoss()
+
 # pbar = tqdm(range(n_epochs), desc="val: loss ?.??? acc ?.??")
 pbar = tqdm(range(n_epochs))
 for epoch in pbar:
@@ -181,12 +201,22 @@ for epoch in pbar:
         loss = cpcn_net.loss()
 
         cpcn_net.calculate_weight_grad()
+        cpcn_classifier_optimizer.zero_grad()
+
+        # propagate through the classifier
+        cpcn_classifier_out = cpcn_classifier(cpcn_net.z[-2])
+        cpcn_classifier_loss = cpcn_classifier_criterion(cpcn_classifier_out, y)
+        cpcn_classifier_loss.backward()
+
         cpcn_optimizer.step()
+        cpcn_classifier_optimizer.step()
 
         cpcn_train_losses[epoch, i] = loss.item()
 
     # evaluate
-    cpcn_losses[epoch], cpcn_accuracies[epoch] = evaluate(cpcn_net, validation_loader)
+    cpcn_losses[epoch], cpcn_accuracies[epoch] = evaluate(
+        cpcn_net, validation_loader, classifier=cpcn_classifier
+    )
     # pbar.set_description(f"val: loss {losses[epoch]:.2g} acc {accuracies[epoch]:.2f}")
     pbar.set_postfix(
         {
@@ -195,7 +225,7 @@ for epoch in pbar:
         }
     )
 
-cpcn_train_losses = np.mean(cpcn_train_losses, axis=1)
+cpcn_train_losses = np.sum(cpcn_train_losses, axis=1) / len(train_loader.dataset)
 
 # %% [markdown]
 # ## Show CPCN learning curves
