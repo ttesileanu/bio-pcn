@@ -106,9 +106,9 @@ test_loader = torch.utils.data.DataLoader(
 # ### Setup network
 
 # %%
-n_epochs = 30
-dims = [784, 50, 10]
-it_inference = 20
+n_epochs = 50
+dims = [784, 50, 20, 10]
+it_inference = 50
 lr_inference = 0.1
 
 torch.manual_seed(123)
@@ -176,7 +176,7 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
 # ## Train CPCN
 
 # %%
-z_it = 20
+z_it = 50
 z_lr = 0.1
 
 torch.manual_seed(123)
