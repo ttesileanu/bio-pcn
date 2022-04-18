@@ -444,7 +444,7 @@ def test_cpcn_loss_matches_pcn_loss_with_appropriate_params():
 
     # copy the neural activations over to CPCN
     for i in range(len(dims)):
-        cpcn.z[i] = pcn.x[i].clone().detach()
+        cpcn.z[i] = pcn.z[i].clone().detach()
 
     # now calculate and compare loss
     pcn_loss = pcn.loss().item()

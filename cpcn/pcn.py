@@ -62,7 +62,7 @@ class PCNetwork(object):
             nn.init.xavier_uniform_(W)
             W.requires_grad = True
 
-        self.x = [torch.zeros(dim) for dim in self.dims]
+        self.z = [torch.zeros(dim) for dim in self.dims]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """ Do a forward pass with unconstrained output.
@@ -73,12 +73,12 @@ class PCNetwork(object):
         :param x: input sample
         :returns: activation at output (last) layer
         """
-        self.x[0] = x
+        self.z[0] = x
         for i in range(len(self.dims) - 1):
             x = self.activation[i](x)
             x = x @ self.W[i].T + self.b[i]
 
-            self.x[i + 1] = x
+            self.z[i + 1] = x
 
         return x
 
@@ -99,10 +99,10 @@ class PCNetwork(object):
 
         # fix the output layer values
         # noinspection PyTypeChecker
-        self.x[-1] = y
+        self.z[-1] = y
 
         # ensure the variables in the hidden layers require grad
-        for x in self.x[1:-1]:
+        for x in self.z[1:-1]:
             x.requires_grad = True
 
         # create an optimizer for the fast parameters
@@ -138,12 +138,12 @@ class PCNetwork(object):
     def loss(self) -> torch.Tensor:
         """ Calculate the loss given the current values of the random variables. """
         loss = torch.FloatTensor([0])
-        x = self.x[0]
+        x = self.z[0]
         for i in range(len(self.dims) - 1):
             x_pred = self.activation[i](x)
             x_pred = x_pred @ self.W[i].T + self.b[i]
 
-            x = self.x[i + 1]
+            x = self.z[i + 1]
             # noinspection PyUnresolvedReferences
             loss += torch.sum((x - x_pred) ** 2) / self.variances[i]
 
@@ -165,8 +165,8 @@ class PCNetwork(object):
                 self.W[i] = self.W[i].to(*args, **kwargs).requires_grad_()
                 self.b[i] = self.b[i].to(*args, **kwargs).requires_grad_()
 
-            for i in range(len(self.x)):
-                self.x[i] = self.x[i].to(*args, **kwargs)
+            for i in range(len(self.z)):
+                self.z[i] = self.z[i].to(*args, **kwargs)
 
         return self
 
@@ -182,7 +182,7 @@ class PCNetwork(object):
 
         These are the random variables in all but the input and output layers.
         """
-        return self.x[1:-1]
+        return self.z[1:-1]
 
     def __str__(self) -> str:
         s = f"PCNetwork(dims={str(self.dims)}, activation={str(self.activation)})"

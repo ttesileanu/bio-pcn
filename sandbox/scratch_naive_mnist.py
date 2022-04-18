@@ -123,7 +123,7 @@ for epoch in pbar:
         loss.backward()
 
         # propagate through the classifier
-        classifier_out = classifier(net.x[-2])
+        classifier_out = classifier(net.z[-2])
         classifier_loss = classifier_criterion(classifier_out, y)
         classifier_loss.backward()
 

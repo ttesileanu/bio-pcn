@@ -37,13 +37,7 @@ def evaluate(
         # figure out model predictions
         y_pred = net.forward(x)
         if classifier is not None:
-            # XXX CPCN calls layers z, PCN calls them x... bad design choice
-            if hasattr(net, "z"):
-                layer_vars = net.z
-            else:
-                layer_vars = net.x
-
-            y_pred = classifier(layer_vars[dim])
+            y_pred = classifier(net.z[dim])
 
         idx_pred = y_pred.argmax(dim=1)
         n_correct += y[range(len(y)), idx_pred].sum()
