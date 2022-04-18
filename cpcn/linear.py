@@ -96,10 +96,10 @@ class LinearCPCNetwork:
         self._initialize_biases()
 
         # create neural variables
-        self.a = [None for _ in self.inter_dims]
-        self.b = [None for _ in self.inter_dims]
-        self.n = [None for _ in self.inter_dims]
-        self.z = [None for _ in self.pyr_dims]
+        self.a = [torch.zeros(dim) for dim in self.pyr_dims[1:-1]]
+        self.b = [torch.zeros(dim) for dim in self.pyr_dims[1:-1]]
+        self.n = [torch.zeros(dim) for dim in self.inter_dims]
+        self.z = [torch.zeros(dim) for dim in self.pyr_dims]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Do a forward pass with unconstrained output.
@@ -178,6 +178,7 @@ class LinearCPCNetwork:
         attribute of each weight tensor.
         """
         D = len(self.pyr_dims) - 2
+        batch_outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
         for i in range(D):
             # apical
             pre = self.z[i + 1]
@@ -185,27 +186,59 @@ class LinearCPCNetwork:
                 post = self.z[i + 2] - self.h_a[i]
             else:
                 post = self.z[i + 2]
-            self.W_a[i].grad = self.g_a[i] * (self.W_a[i] - torch.outer(post, pre))
+            grad = self.g_a[i] * (self.W_a[i] - batch_outer(post, pre))
+            if grad.ndim == self.W_a[i].ndim + 1:
+                # this is a batch evaluation!
+                grad = torch.sum(grad, 0)
+            self.W_a[i].grad = grad
 
             # basal
             plateau = self.g_a[i] * self.a[i]
             hebbian_self = (self.l_s[i] - self.g_b[i]) * self.z[i + 1]
-            hebbian_lateral = self.c_m[i] * self.M[i] @ self.z[i + 1]
+            hebbian_lateral = self.c_m[i] * self.z[i + 1] @ self.M[i].T
             hebbian = hebbian_self + hebbian_lateral
 
             pre = self.z[i]
-            post = plateau - hebbian
-            self.W_b[i].grad = -torch.outer(post, pre)
+            post = hebbian - plateau
+            grad = batch_outer(post, pre)
+            if grad.ndim == self.W_b[i].ndim + 1:
+                # this is a batch evaluation!
+                grad = torch.sum(grad, 0)
+            self.W_b[i].grad = grad
 
             # inter
             pre = self.z[i + 1]
             post = self.n[i]
-            self.Q[i].grad = self.g_a[i] * (self.Q[i] - torch.outer(post, pre))
+            grad = self.g_a[i] * (self.Q[i] - batch_outer(post, pre))
+            if grad.ndim == self.Q[i].ndim + 1:
+                # this is a batch evaluation!
+                grad = torch.sum(grad, 0)
+            self.Q[i].grad = grad
 
             # lateral
             pre = self.z[i + 1]
             post = pre
-            self.M[i].grad = self.c_m[i] * (self.M[i] - torch.outer(post, pre))
+            grad = self.c_m[i] * (self.M[i] - batch_outer(post, pre))
+            if grad.ndim == self.M[i].ndim + 1:
+                # this is a batch evaluation!
+                grad = torch.sum(grad, 0)
+            self.M[i].grad = grad
+
+            # biases
+            if self.bias_a:
+                mu = self.z[i + 1] @ self.W_a[i].T + self.h_a[i]
+                grad = self.g_a[i] * (mu - self.z[i + 2])
+                if grad.ndim == self.h_a[i].ndim + 1:
+                    # this is a batch evaluation!
+                    grad = torch.sum(grad, 0)
+                self.h_a[i].grad = grad
+            if self.bias_b:
+                mu = self.z[i] @ self.W_b[i].T + self.h_b[i]
+                grad = self.g_b[i] * (mu - self.z[i + 1])
+                if grad.ndim == self.h_b[i].ndim + 1:
+                    # this is a batch evaluation!
+                    grad = torch.sum(grad, 0)
+                self.h_b[i].grad = grad
 
     def calculate_z_grad(self):
         """Calculate gradients for fast (z) variables.
@@ -218,7 +251,7 @@ class LinearCPCNetwork:
         for i in range(D):
             grad_apical = self.g_a[i] * self.a[i]
             grad_basal = self.g_b[i] * self.b[i]
-            grad_lateral = self.c_m[i] * self.M[i] @ self.z[i + 1]
+            grad_lateral = self.c_m[i] * self.z[i + 1] @ self.M[i].T
             grad_leak = self.l_s[i] * self.z[i + 1]
 
             self.z[i + 1].grad = grad_lateral + grad_leak - grad_apical - grad_basal
@@ -234,18 +267,18 @@ class LinearCPCNetwork:
         """
         D = len(self.pyr_dims) - 2
         for i in range(D):
-            self.n[i] = self.Q[i] @ self.z[i + 1]
+            self.n[i] = self.z[i + 1] @ self.Q[i].T
 
             if self.bias_b:
-                self.b[i] = self.W_b[i] @ self.z[i] + self.h_b[i]
+                self.b[i] = self.z[i] @ self.W_b[i].T + self.h_b[i]
             else:
-                self.b[i] = self.W_b[i] @ self.z[i]
+                self.b[i] = self.z[i] @ self.W_b[i].T
 
             if self.bias_a:
-                a_feedback = self.W_a[i].T @ (self.z[i + 2] - self.h_a[i])
+                a_feedback = (self.z[i + 2] - self.h_a[i]) @ self.W_a[i]
             else:
-                a_feedback = self.W_a[i].T @ self.z[i + 2]
-            a_inter = self.Q[i].T @ self.n[i]
+                a_feedback = self.z[i + 2] @ self.W_a[i]
+            a_inter = self.n[i] @ self.Q[i]
             self.a[i] = a_feedback - a_inter
 
     def loss(self) -> torch.Tensor:
@@ -272,12 +305,12 @@ class LinearCPCNetwork:
         D = len(self.pyr_dims) - 2
         norm = torch.linalg.norm
         for i in range(D):
-            mu_a = self.W_a[i] @ self.z[i + 1]
+            mu_a = self.z[i + 1] @ self.W_a[i].T
             if self.bias_a:
                 mu_a += self.h_a[i]
             apical = self.g_a[i] * norm(self.z[i + 2] - mu_a) ** 2
 
-            mu_b = self.W_b[i] @ self.z[i]
+            mu_b = self.z[i] @ self.W_b[i].T
             if self.bias_b:
                 mu_b += self.h_b[i]
             basal = self.g_b[i] * norm(self.z[i + 1] - mu_b) ** 2
@@ -294,6 +327,42 @@ class LinearCPCNetwork:
         These are the activations in all the hidden layers.
         """
         return self.z[1:-1]
+
+    def slow_parameters(self) -> list:
+        """ Create list of parameters to optimize in the slow phase.
+
+        These are the weights and biases.
+        """
+        res = self.W_a + self.W_b + self.Q + self.M
+        if self.bias_a:
+            res += self.h_a
+        if self.bias_b:
+            res += self.h_b
+
+        return res
+
+    def to(self, *args, **kwargs):
+        """ Moves and/or casts the parameters and buffers. """
+        with torch.no_grad():
+            for i in range(len(self.W_a)):
+                self.W_a[i] = self.W_a[i].to(*args, **kwargs).requires_grad_()
+                self.W_b[i] = self.W_b[i].to(*args, **kwargs).requires_grad_()
+                if self.bias_a:
+                    self.h_a[i] = self.h_a[i].to(*args, **kwargs).requires_grad_()
+                if self.bias_b:
+                    self.h_b[i] = self.h_b[i].to(*args, **kwargs).requires_grad_()
+
+                self.Q[i] = self.Q[i].to(*args, **kwargs).requires_grad_()
+                self.M[i] = self.M[i].to(*args, **kwargs).requires_grad_()
+
+                self.a[i] = self.a[i].to(*args, **kwargs)
+                self.b[i] = self.b[i].to(*args, **kwargs)
+                self.n[i] = self.n[i].to(*args, **kwargs)
+
+            for i in range(len(self.z)):
+                self.z[i] = self.z[i].to(*args, **kwargs)
+
+        return self
 
     def _initialize_interlayer_weights(self):
         for lst in [self.W_a, self.W_b]:
@@ -329,10 +398,40 @@ class LinearCPCNetwork:
                 theta = theta.clone()
             else:
                 theta = theta * torch.ones(D)
-        elif np.size(theta) > 1:
+        elif hasattr(theta, "__len__") and len(theta) == D:
             assert len(theta) == D
             theta = torch.from_numpy(np.asarray(theta))
-        else:
+        elif np.size(theta) == 1:
             theta = theta * torch.ones(D)
+        else:
+            raise ValueError("parameter has wrong size")
 
         return theta
+
+    def __str__(self) -> str:
+        s = (
+            f"LinearCPCNetwork(pyr_dims={str(self.pyr_dims)}, "
+            f"inter_dims={str(self.inter_dims)}, "
+            f"bias_a={self.bias_a}, "
+            f"bias_b={self.bias_b}"
+            f")"
+        )
+        return s
+
+    def __repr__(self) -> str:
+        s = (
+            f"LinearCPCNetwork("
+            f"pyr_dims={repr(self.pyr_dims)}, "
+            f"inter_dims={repr(self.inter_dims)}, "
+            f"bias_a={self.bias_a}, "
+            f"bias_b={self.bias_b}, "
+            f"fast_optimizer={repr(self.fast_optimizer)}, "
+            f"z_it={self.z_it}, "
+            f"z_lr={self.z_lr}, "
+            f"g_a={repr(self.g_a)}, "
+            f"g_b={repr(self.g_b)}, "
+            f"l_s={repr(self.l_s)}, "
+            f"c_m={repr(self.c_m)}"
+            f")"
+        )
+        return s

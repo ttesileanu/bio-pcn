@@ -4,6 +4,7 @@ from cpcn.linear import LinearCPCNetwork
 from cpcn.pcn import PCNetwork
 
 import torch
+import numpy as np
 
 
 @pytest.fixture
@@ -112,11 +113,11 @@ def test_z_sizes(net):
     assert [len(_) for _ in net.z] == [3, 4, 5, 2]
 
 
-def test_all_z_not_none_after_forward(net):
+def test_all_z_nonzero_after_forward(net):
     net.forward(torch.FloatTensor([0.3, -0.4, 0.2]))
 
     for z in net.z:
-        assert z is not None
+        assert torch.max(torch.abs(z)) > 1e-4
 
 
 def test_all_z_change_during_forward(net):
@@ -143,13 +144,13 @@ def test_forward_constrained_starts_with_forward(net):
         assert torch.all(torch.isclose(old, new))
 
 
-def test_all_z_not_none_after_forward_constrained(net):
+def test_all_z_nonzero_after_forward_constrained(net):
     net.forward_constrained(
         torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4])
     )
 
     for z in net.z:
-        assert z is not None
+        assert torch.max(torch.abs(z)) > 1e-4
 
 
 def test_all_z_change_during_forward_constrained(net):
@@ -450,3 +451,224 @@ def test_cpcn_loss_matches_pcn_loss_with_appropriate_params():
     cpcn_loss = cpcn.loss().item()
 
     assert pcn_loss == pytest.approx(cpcn_loss)
+
+
+def test_init_params_with_numpy_scalar():
+    net = LinearCPCNetwork([2, 3, 4], g_a=np.asarray([0.5]))
+
+
+def test_to_returns_self(net):
+    assert net.to(torch.device("cpu")) is net
+
+
+def test_repr(net):
+    s = repr(net)
+
+    assert s.startswith("LinearCPCNetwork(")
+    assert s.endswith(")")
+
+
+def test_str(net):
+    s = str(net)
+
+    assert s.startswith("LinearCPCNetwork(")
+    assert s.endswith(")")
+
+
+def test_a_size_when_inter_different_from_pyr(net_inter_dims):
+    D = len(net_inter_dims.inter_dims)
+    for i in range(D):
+        dim = net_inter_dims.pyr_dims[i + 1]
+        assert len(net_inter_dims.a[i]) == dim
+
+
+def test_b_size_when_inter_different_from_pyr(net_inter_dims):
+    D = len(net_inter_dims.inter_dims)
+    for i in range(D):
+        dim = net_inter_dims.pyr_dims[i + 1]
+        assert len(net_inter_dims.b[i]) == dim
+
+
+def test_n_size_when_inter_different_from_pyr(net_inter_dims):
+    D = len(net_inter_dims.inter_dims)
+    for i in range(D):
+        dim = net_inter_dims.inter_dims[i]
+        assert len(net_inter_dims.n[i]) == dim
+
+
+def test_run_on_batch(net):
+    x = torch.FloatTensor([[-0.2, -0.3, 0.5], [0.1, 0.5, -1.2]])
+    y = torch.FloatTensor([[1.2, -0.5], [-0.3, -0.4]])
+    net.forward_constrained(x, y)
+
+    batch_z = [_.clone().detach() for _ in net.z]
+
+    for i in range(len(x)):
+        net.forward_constrained(x[i], y[i])
+        for old_z, new_z in zip(batch_z, net.z):
+            assert torch.allclose(old_z[i], new_z)
+
+
+def test_loss_on_batch(net):
+    x = torch.FloatTensor([[-0.2, -0.3, 0.5], [0.1, 0.5, -1.2]])
+    y = torch.FloatTensor([[1.2, -0.5], [-0.3, -0.4]])
+    net.forward_constrained(x, y)
+    batch_loss = net.loss()
+
+    loss = 0
+    for i in range(len(x)):
+        net.forward_constrained(x[i], y[i])
+        loss += net.loss()
+
+    assert batch_loss.item() == pytest.approx(loss.item())
+
+
+def test_weight_grad_on_batch(net):
+    x = torch.FloatTensor([[-0.2, -0.3, 0.5], [0.1, 0.5, -1.2]])
+    y = torch.FloatTensor([[1.2, -0.5], [-0.3, -0.4]])
+    net.forward_constrained(x, y)
+    net.calculate_weight_grad()
+
+    batch_W_grad = [_.grad.clone().detach() for _ in net.W_a + net.W_b]
+
+    expected_grads = [torch.zeros_like(_) for _ in batch_W_grad]
+    for i in range(len(x)):
+        net.forward_constrained(x[i], y[i])
+        net.calculate_weight_grad()
+        for k, new_W in enumerate(net.W_a + net.W_b):
+            expected_grads[k] += new_W.grad
+
+    for old, new in zip(batch_W_grad, expected_grads):
+        assert torch.allclose(old, new)
+
+
+def test_bias_grad_on_batch(net):
+    x = torch.FloatTensor([[-0.2, -0.3, 0.5], [0.1, 0.5, -1.2]])
+    y = torch.FloatTensor([[1.2, -0.5], [-0.3, -0.4]])
+    net.forward_constrained(x, y)
+    net.calculate_weight_grad()
+
+    batch_h_grad = [_.grad.clone().detach() for _ in net.h_a + net.h_b]
+
+    expected_grads = [torch.zeros_like(_) for _ in batch_h_grad]
+    for i in range(len(x)):
+        net.forward_constrained(x[i], y[i])
+        net.calculate_weight_grad()
+        for k, new_h in enumerate(net.h_a + net.h_b):
+            expected_grads[k] += new_h.grad
+
+    for old, new in zip(batch_h_grad, expected_grads):
+        assert torch.allclose(old, new)
+
+
+def test_weights_change_when_optimizing_slow_parameters(net):
+    x0 = torch.FloatTensor([-0.3, -0.2, 0.6])
+    y0 = torch.FloatTensor([0.9, 0.3])
+    old_Ws = [_.clone().detach() for _ in net.W_a + net.W_b + net.Q + net.M]
+
+    optimizer = torch.optim.Adam(net.slow_parameters(), lr=1.0)
+    net.forward_constrained(x0, y0)
+    net.calculate_weight_grad()
+    optimizer.step()
+
+    new_Ws = net.W_a + net.W_b + net.Q + net.M
+    for old_W, new_W in zip(old_Ws, new_Ws):
+        assert not torch.any(torch.isclose(old_W, new_W))
+
+
+def test_biases_change_when_optimizing_slow_parameters(net):
+    x0 = torch.FloatTensor([-0.3, -0.2, 0.6])
+    y0 = torch.FloatTensor([0.9, 0.3])
+    old_hs = [_.clone().detach() for _ in net.h_a + net.h_b]
+
+    optimizer = torch.optim.Adam(net.slow_parameters(), lr=1.0)
+    net.forward_constrained(x0, y0)
+    net.calculate_weight_grad()
+    optimizer.step()
+
+    new_hs = net.h_a + net.h_b
+    for old_h, new_h in zip(old_hs, new_hs):
+        assert not torch.any(torch.isclose(old_h, new_h))
+
+
+def test_no_nan_or_inf_after_a_few_learning_steps(net):
+    torch.manual_seed(0)
+
+    optimizer = torch.optim.Adam(net.slow_parameters(), lr=1e-3)
+    for i in range(4):
+        x = torch.Tensor(3).uniform_()
+        y = torch.Tensor(2).uniform_()
+        net.forward_constrained(x, y)
+        net.calculate_weight_grad()
+        optimizer.step()
+
+    for W in net.W_a + net.W_b + net.Q + net.M:
+        assert torch.all(torch.isfinite(W))
+
+    for h in net.h_a + net.h_b:
+        assert torch.all(torch.isfinite(h))
+
+    for z in net.z:
+        assert torch.all(torch.isfinite(z))
+
+
+def linear_cpcn_loss(net: LinearCPCNetwork) -> torch.Tensor:
+    D = len(net.inter_dims)
+    loss = torch.FloatTensor([0])
+    for i in range(D):
+        z = net.z[i + 1]
+
+        mu = net.z[i] @ net.W_b[i].T + net.h_b[i]
+        error = z - mu
+        basal = 0.5 * net.g_b[i] * torch.sum(error ** 2)
+
+        diff = net.z[i + 2] - net.h_a[i]
+        cross_term = torch.dot(diff, z @ net.W_a[i].T)
+        wa_reg = torch.trace(net.W_a[i] @ net.W_a[i].T)
+        apical0 = torch.sum(diff ** 2) - 2 * cross_term + wa_reg
+        apical = 0.5 * net.g_a[i] * apical0
+
+        # need to flip this for Q because we're maximizing!!
+        z_cons = torch.outer(z, z) - torch.eye(len(z))
+        q_prod = net.Q[i].T @ net.Q[i]
+        constraint0 = torch.trace(q_prod @ z_cons)
+        constraint = -0.5 * net.g_a[i] * constraint0
+
+        alpha = net.l_s[i] - net.g_b[i]
+        z_reg = 0.5 * alpha * torch.sum(z ** 2)
+
+        m_prod = torch.dot(z, net.M[i] @ z)
+        m_reg = torch.trace(net.M[i] @ net.M[i].T)
+        lateral0 = -2 * m_prod + m_reg
+        lateral = 0.5 * net.c_m[i] * lateral0
+
+        loss += basal + apical + constraint + z_reg + lateral
+
+    return loss
+
+
+@pytest.mark.parametrize("var", ["W_a", "W_b", "h_a", "h_b", "Q", "M"])
+def test_weight_gradients_match_autograd_from_loss(net, var):
+    net.z_it = 1000
+
+    x0 = torch.FloatTensor([-0.3, -0.2, 0.6])
+    y0 = torch.FloatTensor([0.9, 0.3])
+
+    net.forward_constrained(x0, y0)
+    net.calculate_weight_grad()
+
+    manual_grads = [_.grad.clone().detach() for _ in getattr(net, var)]
+
+    for param in net.slow_parameters():
+        param.requires_grad_()
+        if param.grad is not None:
+            param.grad.detach_()
+            param.grad.zero_()
+
+    loss = linear_cpcn_loss(net)
+    loss.backward()
+
+    loss_grads = [_.grad.clone().detach() for _ in getattr(net, var)]
+
+    for from_manual, from_loss in zip(manual_grads, loss_grads):
+        assert torch.allclose(from_manual, from_loss, rtol=1e-2, atol=1e-5)
