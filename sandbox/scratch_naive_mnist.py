@@ -14,7 +14,7 @@ from tqdm.notebook import tqdm
 
 from cpcn.linear import LinearCPCNetwork
 from cpcn.pcn import PCNetwork
-from cpcn.util import make_onehot
+from cpcn.util import make_onehot, evaluate
 
 # %% [markdown]
 # ## Choose device
@@ -48,34 +48,6 @@ for key, item in dataset.items():
         item[0].reshape(item[0].shape[0], -1).to(device),
         make_onehot(item[1]).to(device),
     )
-
-# %% [markdown]
-# ## Define evaluation function
-
-# %%
-def evaluate(net, loader, device) -> tuple:
-    """Evaluate PCN or CPCN network on test set.
-    
-    :param net: network whose performance to evaluate
-    :param loader: test set loader
-    :return: tuple (PC_loss, accuracy), where `PC_loss` is the predictive-coding loss,
-        as returned by `net.loss()` after a run of `forward_constrained`
-    """
-    n = 0
-    n_correct = 0
-    loss = 0
-    for x, y in loader:
-        y_pred = net.forward(x)
-        net.forward_constrained(x, y)
-        loss += net.loss().item()
-
-        idx_pred = y_pred.argmax(dim=1)
-        n_correct += y[range(len(y)), idx_pred].sum()
-        n += len(y)
-
-    avg_loss = loss / n
-    frac_correct = n_correct / n
-    return avg_loss, frac_correct
 
 
 # %% [markdown]
@@ -148,7 +120,7 @@ for epoch in pbar:
         train_losses[epoch, i] = loss.item()
 
     # evaluate
-    losses[epoch], accuracies[epoch] = evaluate(net, validation_loader, device)
+    losses[epoch], accuracies[epoch] = evaluate(net, validation_loader)
     # pbar.set_description(f"val: loss {losses[epoch]:.2g} acc {accuracies[epoch]:.2f}")
     pbar.set_postfix(
         {"val_loss": f"{losses[epoch]:.2g}", "val_acc": f"{accuracies[epoch]:.2f}"}
@@ -214,9 +186,7 @@ for epoch in pbar:
         cpcn_train_losses[epoch, i] = loss.item()
 
     # evaluate
-    cpcn_losses[epoch], cpcn_accuracies[epoch] = evaluate(
-        cpcn_net, validation_loader, device
-    )
+    cpcn_losses[epoch], cpcn_accuracies[epoch] = evaluate(cpcn_net, validation_loader)
     # pbar.set_description(f"val: loss {losses[epoch]:.2g} acc {accuracies[epoch]:.2f}")
     pbar.set_postfix(
         {
