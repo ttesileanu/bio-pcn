@@ -86,6 +86,7 @@ def train(
     classifier_dim: int = -2,
     per_batch: bool = False,
     progress: Optional[Callable] = None,
+    reporter: Optional[Callable] = None,
 ) -> SimpleNamespace:
     """Train a (constrained or not) predictive-coding network.
     
@@ -114,8 +115,11 @@ def train(
     :param per_batch: if true, losses and accuracies are returned for each batch; if
         false, they are averaged over the batches to return one value for each epoch
     :param progress: progress indicator; should have `tqdm` interface
+    :param reporter: callback to call after each epoch, as `reporter(epoch_results)`,
+        where `epoch_results` is a namespace with members `epoch`, `epoch_train_loss`,
+        `epoch_train_accuracy`, `epoch_val_loss`, `epoch_val_accuracy`
     :return: a namespace with the members `train` and `validation`, each containing
-        two Numpy arrays, `pc_losses` and `accuracies`.
+        two Numpy arrays, `pc_loss` and `accuracy`.
     """
     # handle some defaults
     if optimizer_kwargs is None:
@@ -193,6 +197,8 @@ def train(
         )
 
         # store loss and accuracy values
+        epoch_train_loss = np.mean(batch_train_loss)
+        epoch_train_accuracy = np.mean(batch_train_accuracy)
         epoch_val_loss = np.mean(batch_val_loss)
         epoch_val_accuracy = np.mean(batch_val_accuracy)
         if per_batch:
@@ -201,10 +207,22 @@ def train(
             res.validation.pc_loss.extend(batch_val_loss)
             res.validation.accuracy.extend(batch_val_accuracy)
         else:
-            res.train.pc_loss.append(np.mean(batch_train_loss))
-            res.train.accuracy.append(np.mean(batch_train_accuracy))
+            res.train.pc_loss.append(epoch_train_loss)
+            res.train.accuracy.append(epoch_train_accuracy)
             res.validation.pc_loss.append(epoch_val_loss)
             res.validation.accuracy.append(epoch_val_accuracy)
+
+        # report results, if desired
+        if reporter is not None:
+            reporter(
+                SimpleNamespace(
+                    epoch=epoch,
+                    epoch_train_loss=epoch_train_loss,
+                    epoch_train_accuracy=epoch_train_accuracy,
+                    epoch_val_loss=epoch_val_loss,
+                    epoch_val_accuracy=epoch_val_accuracy,
+                )
+            )
 
         # update progress bar, if any
         if progress is not None:
