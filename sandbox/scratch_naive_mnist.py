@@ -8,47 +8,20 @@ import pydove as dv
 
 import numpy as np
 import torch
-import torchvision
 
 from tqdm.notebook import tqdm
 
 from cpcn.linear import LinearCPCNetwork
 from cpcn.pcn import PCNetwork
-from cpcn.util import make_onehot, train
+from cpcn.util import load_mnist, train
 
 # %% [markdown]
-# ## Choose device
+# ## Setup
 
 # %%
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = "cpu"
-
-# %% [markdown]
-# ## Load dataset
-
-# %%
-trainset = torchvision.datasets.MNIST("data/", train=True, download=True)
-testset = torchvision.datasets.MNIST("data/", train=False, download=True)
-
-# split out a validation set and normalize
-mu = 33.3184
-sigma = 78.5675
-normalized = (trainset.data - mu) / sigma
-train_size = 5_000
-validation_size = 1_000
-dataset = {
-    "train": (normalized[:train_size], trainset.targets[:train_size]),
-    "validation": (normalized[-validation_size:], trainset.targets[-validation_size:]),
-    "test": ((testset.data - mu) / sigma, testset.targets),
-}
-
-# flatten images; make labels one hot
-for key, item in dataset.items():
-    dataset[key] = (
-        item[0].reshape(item[0].shape[0], -1).to(device),
-        make_onehot(item[1]).to(device),
-    )
-
+device = torch.device("cpu")
+dataset = load_mnist(n_train=5000, n_validation=1000, device=device)
 
 # %% [markdown]
 # ## Train PCN
