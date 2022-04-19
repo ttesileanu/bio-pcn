@@ -285,9 +285,9 @@ def test_no_z_grad_for_input_and_output(net):
         assert net.z[i].grad is None
 
 
-def test_loss_function(net):
+def test_pc_loss_function(net):
     net.forward(torch.FloatTensor([0.2, -0.5, 0.3]))
-    loss = net.loss().item()
+    loss = net.pc_loss().item()
 
     expected = 0
     D = len(net.pyr_dims) - 2
@@ -414,7 +414,7 @@ def test_allow_scalar_tensor_conductances_in_constructor(which):
     assert getattr(pcn, which).shape == (2,)
 
 
-def test_cpcn_loss_matches_pcn_loss_with_appropriate_params():
+def test_cpcn_pc_loss_matches_pcn_loss_with_appropriate_params():
     torch.manual_seed(2)
 
     dims = [2, 4, 3, 7, 3]
@@ -448,7 +448,7 @@ def test_cpcn_loss_matches_pcn_loss_with_appropriate_params():
 
     # now calculate and compare loss
     pcn_loss = pcn.loss().item()
-    cpcn_loss = cpcn.loss().item()
+    cpcn_loss = cpcn.pc_loss().item()
 
     assert pcn_loss == pytest.approx(cpcn_loss)
 
@@ -509,16 +509,16 @@ def test_run_on_batch(net):
             assert torch.allclose(old_z[i], new_z)
 
 
-def test_loss_on_batch(net):
+def test_pc_loss_on_batch(net):
     x = torch.FloatTensor([[-0.2, -0.3, 0.5], [0.1, 0.5, -1.2]])
     y = torch.FloatTensor([[1.2, -0.5], [-0.3, -0.4]])
     net.forward_constrained(x, y)
-    batch_loss = net.loss()
+    batch_loss = net.pc_loss()
 
     loss = 0
     for i in range(len(x)):
         net.forward_constrained(x[i], y[i])
-        loss += net.loss()
+        loss += net.pc_loss()
 
     assert batch_loss.item() == pytest.approx(loss.item())
 

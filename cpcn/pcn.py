@@ -150,6 +150,10 @@ class PCNetwork(object):
         loss *= 0.5
         return loss
 
+    def pc_loss(self) -> torch.Tensor:
+        """ An alias of `self.loss()`, for consistency with CPCN classes."""
+        return self.loss()
+
     def train(self):
         """ Set in training mode. """
         self.training = True

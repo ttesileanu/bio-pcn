@@ -32,7 +32,7 @@ def evaluate(
     loss = 0
     for x, y in loader:
         net.forward_constrained(x, y)
-        loss += net.loss().item()
+        loss += net.pc_loss().item()
 
         # figure out model predictions
         y_pred = net.forward(x)

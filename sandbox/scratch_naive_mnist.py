@@ -198,7 +198,7 @@ for epoch in pbar:
     # train
     for i, (x, y) in enumerate(train_loader):
         cpcn_net.forward_constrained(x, y)
-        loss = cpcn_net.loss()
+        loss = cpcn_net.pc_loss()
 
         cpcn_net.calculate_weight_grad()
         cpcn_classifier_optimizer.zero_grad()

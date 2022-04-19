@@ -439,3 +439,11 @@ def test_str(net):
 
     assert s.startswith("PCNetwork(")
     assert s.endswith(")")
+
+
+def test_pc_loss_matches_loss(net):
+    net.forward_constrained(
+        torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4])
+    )
+
+    assert net.loss().item() == pytest.approx(net.pc_loss().item())

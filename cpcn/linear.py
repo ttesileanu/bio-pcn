@@ -129,7 +129,7 @@ class LinearCPCNetwork:
         return x
 
     def forward_constrained(
-        self, x: torch.Tensor, y: torch.Tensor, loss_profile: bool = False
+        self, x: torch.Tensor, y: torch.Tensor, pc_loss_profile: bool = False
     ) -> Optional[Sequence]:
         """Do a forward pass where both input and output values are fixed.
 
@@ -139,10 +139,10 @@ class LinearCPCNetwork:
 
         :param x: input sample
         :param y: output sample
-        :param loss_profile: if true, evaluates and returns the loss at every step; see
-            `LinearCPCNetwork.loss`
-        :return: if `loss_profile` is true, loss evaluated before every optimization
-            step; otherwise, `None`
+        :param pc_loss_profile: if true, evaluates and returns the predictive-coding
+            loss at every step; see `self.pc_loss()`
+        :return: if `pc_loss_profile` is true, the predictive-coding loss evaluated
+            before every optimization step; otherwise, `None`
         """
         # we calculate gradients manually
         with torch.no_grad():
@@ -157,17 +157,17 @@ class LinearCPCNetwork:
             fast_optimizer = self.fast_optimizer(self.fast_parameters(), lr=self.z_lr)
 
             # iterate until convergence
-            if loss_profile:
+            if pc_loss_profile:
                 losses = np.zeros(self.z_it)
             for i in range(self.z_it):
                 self.calculate_currents()
                 self.calculate_z_grad()
                 fast_optimizer.step()
 
-                if loss_profile:
-                    losses[i] = self.loss().item()
+                if pc_loss_profile:
+                    losses[i] = self.pc_loss().item()
 
-        if loss_profile:
+        if pc_loss_profile:
             return losses
 
     def calculate_weight_grad(self):
@@ -176,6 +176,11 @@ class LinearCPCNetwork:
         This assumes that the fast variables have been calculated, using
         `forward_constrained`. The calculated gradients are assigned the `grad`
         attribute of each weight tensor.
+
+        Note that these gradients do not follow from `self.pc_loss()`! While there is a
+        modified loss that can generate both the latent- and weight-gradients in the
+        linear case, this is no longer true for non-linear generalizations. We therefore
+        use manual gradients in this case, as well, for consistency.
         """
         D = len(self.pyr_dims) - 2
         batch_outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
@@ -246,6 +251,11 @@ class LinearCPCNetwork:
         This assumes that the currents were calculated using `calculate_currents`. The
         calculated gradients are assigned to the `grad` attribute of each tensor in
         `self.z`.
+
+        Note that these gradients do not follow from `self.pc_loss()`! While there is a
+        modified loss that can generate both the latent- and weight-gradients in the
+        linear case, this is no longer true for non-linear generalizations. We therefore
+        use manual gradients in this case, as well, for consistency.
         """
         D = len(self.pyr_dims) - 2
         for i in range(D):
@@ -281,14 +291,18 @@ class LinearCPCNetwork:
             a_inter = self.n[i] @ self.Q[i]
             self.a[i] = a_feedback - a_inter
 
-    def loss(self) -> torch.Tensor:
-        """Estimate loss given current activation values.
+    def pc_loss(self) -> torch.Tensor:
+        """Estimate predictive-coding loss given current activation values.
+
+        Note that this loss does *not* generate either the latent-state gradients from
+        `self.calculate_z_grad()`, or the weight gradients from
+        `self.calculate_weight_grad()`!
 
         This is defined as the predictive-coding loss with duplicated weights connecting
         the hidden layers. Schematically,
 
-            loss = 0.5 * sum(g_a * (z[l + 1] - mu_a[l + 1]) ** 2 +
-                             g_b * (z[l] - mu_b[l]) ** 2))
+            pc_loss = 0.5 * sum(g_a * (z[l + 1] - mu_a[l + 1]) ** 2 +
+                                g_b * (z[l] - mu_b[l]) ** 2))
 
         where the sum is over the hidden layers, and the predictions `mu_a` and `mu_b`
         are calculated using the apical and basal weights and biases, respectively:
