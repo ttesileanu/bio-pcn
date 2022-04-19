@@ -11,9 +11,7 @@ import torch
 
 from tqdm.notebook import tqdm
 
-from cpcn.linear import LinearCPCNetwork
-from cpcn.pcn import PCNetwork
-from cpcn.util import load_mnist, train
+from cpcn import LinearCPCNetwork, PCNetwork, load_mnist, train
 
 # %% [markdown]
 # ## Setup
