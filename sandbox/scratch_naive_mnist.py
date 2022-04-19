@@ -19,34 +19,15 @@ from cpcn import LinearCPCNetwork, PCNetwork, load_mnist, train
 # %%
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = torch.device("cpu")
+
+# for reproducibility
+torch.manual_seed(123)
+
+# this creates the loaders, by default
 dataset = load_mnist(n_train=5000, n_validation=1000, device=device)
 
 # %% [markdown]
 # ## Train PCN
-
-# %% [markdown]
-# ### Setup loaders
-
-# %%
-# for reproducibility
-torch.manual_seed(123)
-
-batch_size = 128
-
-train_loader = torch.utils.data.DataLoader(
-    torch.utils.data.TensorDataset(*dataset["train"]),
-    batch_size=batch_size,
-    shuffle=True,
-)
-validation_loader = torch.utils.data.DataLoader(
-    torch.utils.data.TensorDataset(*dataset["validation"]), batch_size=batch_size,
-)
-test_loader = torch.utils.data.DataLoader(
-    torch.utils.data.TensorDataset(*dataset["test"]), batch_size=batch_size,
-)
-
-# %% [markdown]
-# ### Run training
 
 # %%
 n_epochs = 50
@@ -66,7 +47,12 @@ net = PCNetwork(
 net = net.to(device)
 
 results = train(
-    net, n_epochs, train_loader, validation_loader, classifier="linear", progress=tqdm
+    net,
+    n_epochs,
+    dataset["train"],
+    dataset["validation"],
+    classifier="linear",
+    progress=tqdm,
 )
 
 # %% [markdown]
@@ -123,40 +109,14 @@ cpcn_net = cpcn_net.to(device)
 cpcn_results = train(
     cpcn_net,
     n_epochs,
-    train_loader,
-    validation_loader,
+    dataset["train"],
+    dataset["validation"],
     classifier="linear",
     progress=tqdm,
 )
 
 # %% [markdown]
 # ### Show CPCN learning curves
-
-with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
-    ax1.semilogy(results.train.pc_loss, label="train")
-    ax1.semilogy(results.validation.pc_loss, label="val")
-    ax1.set_xlabel("epoch")
-    ax1.set_ylabel("predictive-coding loss")
-    ax1.legend(frameon=False)
-    last_loss = results.train.pc_loss[-1]
-    ax1.annotate(f"{last_loss:.3f}", (len(results.train.pc_loss), last_loss), c="C0")
-    last_loss = results.validation.pc_loss[-1]
-    ax1.annotate(
-        f"{last_loss:.3f}", (len(results.validation.pc_loss), last_loss), c="C1"
-    )
-
-    ax2.plot(100 * results.train.accuracy, label="train")
-    ax2.plot(100 * results.validation.accuracy, label="val")
-    ax2.set_xlabel("epoch")
-    ax2.set_ylabel("accuracy on validation set (%)")
-    ax2.legend(frameon=False)
-    last_acc = 100 * results.train.accuracy[-1]
-    ax2.annotate(f"{last_acc:.1f}%", (len(results.train.accuracy), last_acc), c="C0")
-    last_acc = 100 * results.validation.accuracy[-1]
-    ax2.annotate(
-        f"{last_acc:.1f}%", (len(results.validation.accuracy), last_acc), c="C1"
-    )
-    ax2.set_ylim(0, 100)
 
 # %%
 with dv.FigureManager(1, 2) as (_, (ax1, ax2)):

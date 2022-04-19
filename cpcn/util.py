@@ -232,6 +232,8 @@ def load_mnist(
     one_hot: bool = True,
     cache_path: str = "data/",
     device: Optional[torch.device] = None,
+    batch_size: int = 128,
+    return_loaders: bool = True,
 ) -> dict:
     """Load (parts of) the MNIST dataset and split out a validation set.
     
@@ -244,8 +246,12 @@ def load_mnist(
     :param one_hot: whether to convert the labels to a one-hot encoding
     :param cache_path: cache from where to load / where to store the datasets
     :param device: device to send the data to
+    :param batch_size: if `return_loaders` is true, this sets the batch size used
+    :param return_loaders: if true, data loaders are returned instead of the data sets;
+        only the training loader uses shuffling
     :return: a dictionary with keys `"train"`, `"validation"`, `"test"`, each of which
-        maps to a tuple of two tensors, one for input, one for labels
+        maps to either a data loader (if `return_loaders` is true), or a tuple of two
+        tensors, one for input, one for labels
     """
     trainset = torchvision.datasets.MNIST(cache_path, train=True, download=True)
     testset = torchvision.datasets.MNIST(cache_path, train=False, download=True)
@@ -284,6 +290,12 @@ def load_mnist(
             input = input.to(device)
             labels = labels.to(device)
 
-        dataset[key] = (input, labels)
+        if return_loaders:
+            tensor_dataset = torch.utils.data.TensorDataset(input, labels)
+            dataset[key] = torch.utils.data.DataLoader(
+                tensor_dataset, batch_size=batch_size, shuffle=(key == "train")
+            )
+        else:
+            dataset[key] = (input, labels)
 
     return dataset
