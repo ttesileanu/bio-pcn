@@ -447,3 +447,22 @@ def test_pc_loss_matches_loss(net):
     )
 
     assert net.loss().item() == pytest.approx(net.pc_loss().item())
+
+
+def test_calculate_weight_grad_matches_backward_on_loss(net):
+    net.forward_constrained(
+        torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4])
+    )
+    net.calculate_weight_grad()
+
+    old_grad = [_.grad.clone().detach() for _ in net.slow_parameters()]
+
+    for param in net.slow_parameters():
+        if param.grad is not None:
+            param.grad.zero_()
+
+    loss = net.loss()
+    loss.backward()
+
+    for old, new_param in zip(old_grad, net.slow_parameters()):
+        assert torch.allclose(old, new_param.grad)

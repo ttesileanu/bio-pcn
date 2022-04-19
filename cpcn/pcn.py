@@ -154,6 +154,20 @@ class PCNetwork(object):
         """ An alias of `self.loss()`, for consistency with CPCN classes."""
         return self.loss()
 
+    def calculate_weight_grad(self):
+        """Calculate gradients for slow (weight) variables.
+
+        This is equivalent to using `backward()` on the output from `self.loss()`
+        (after zeroing all the gradients) and is only provided here for consistency with
+        constrained predictive-coding networks, where the gradients are calculated
+        manually.
+        """
+        for param in self.slow_parameters():
+            param.grad = None
+
+        loss = self.loss()
+        loss.backward()
+
     def train(self):
         """ Set in training mode. """
         self.training = True
