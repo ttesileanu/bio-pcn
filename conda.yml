@@ -1,5 +1,6 @@
 channels:
 - defaults
+- conda-forge
 dependencies:
  - python=3.9
  - pip
@@ -12,6 +13,8 @@ dependencies:
  - seaborn
  - pytorch::pytorch
  - pytorch::torchvision
+ - scikit-learn
+ - optuna
  - tqdm
  - ipykernel
  - pip:
