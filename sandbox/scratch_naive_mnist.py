@@ -14,7 +14,7 @@ from tqdm.notebook import tqdm
 
 from cpcn.linear import LinearCPCNetwork
 from cpcn.pcn import PCNetwork
-from cpcn.util import make_onehot, evaluate
+from cpcn.util import make_onehot, train
 
 # %% [markdown]
 # ## Choose device
@@ -75,7 +75,7 @@ test_loader = torch.utils.data.DataLoader(
 )
 
 # %% [markdown]
-# ### Setup network
+# ### Run training
 
 # %%
 n_epochs = 50
@@ -94,69 +94,38 @@ net = PCNetwork(
 )
 net = net.to(device)
 
-# %% [markdown]
-# ### Run the actual training
-
-# %%
-losses = np.zeros(n_epochs)
-accuracies = np.zeros(n_epochs)
-train_losses = np.zeros((n_epochs, len(train_loader)))
-
-optimizer = torch.optim.Adam(net.slow_parameters(), lr=0.001)
-
-# train a linear classifier on the output from the last hidden layer
-classifier = torch.nn.Sequential(torch.nn.Linear(*dims[-2:]))
-classifier_optimizer = torch.optim.Adam(classifier.parameters(), lr=0.001)
-classifier_criterion = torch.nn.MSELoss()
-
-# pbar = tqdm(range(n_epochs), desc="val: loss ?.??? acc ?.??")
-pbar = tqdm(range(n_epochs))
-for epoch in pbar:
-    # train
-    for i, (x, y) in enumerate(train_loader):
-        net.forward_constrained(x, y)
-
-        classifier_optimizer.zero_grad()
-        optimizer.zero_grad()
-
-        loss = net.loss()
-        loss.backward()
-
-        # propagate through the classifier
-        classifier_out = classifier(net.z[-2])
-        classifier_loss = classifier_criterion(classifier_out, y)
-        classifier_loss.backward()
-
-        optimizer.step()
-        classifier_optimizer.step()
-
-        train_losses[epoch, i] = loss.item()
-
-    # evaluate
-    losses[epoch], accuracies[epoch] = evaluate(
-        net, validation_loader, classifier=classifier
-    )
-    # pbar.set_description(f"val: loss {losses[epoch]:.2g} acc {accuracies[epoch]:.2f}")
-    pbar.set_postfix(
-        {"val_loss": f"{losses[epoch]:.2g}", "val_acc": f"{accuracies[epoch]:.2f}"}
-    )
-
-train_losses = np.sum(train_losses, axis=1) / len(train_loader.dataset)
+results = train(
+    net, n_epochs, train_loader, validation_loader, classifier="linear", progress=tqdm
+)
 
 # %% [markdown]
-# ## Show learning curves
+# ### Show PCN learning curves
 
 # %%
 with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
-    ax1.semilogy(train_losses, label="train")
-    ax1.semilogy(losses, label="val")
+    ax1.semilogy(results.train.pc_loss, label="train")
+    ax1.semilogy(results.validation.pc_loss, label="val")
     ax1.set_xlabel("epoch")
     ax1.set_ylabel("predictive-coding loss")
     ax1.legend(frameon=False)
+    last_loss = results.train.pc_loss[-1]
+    ax1.annotate(f"{last_loss:.3f}", (len(results.train.pc_loss), last_loss), c="C0")
+    last_loss = results.validation.pc_loss[-1]
+    ax1.annotate(
+        f"{last_loss:.3f}", (len(results.validation.pc_loss), last_loss), c="C1"
+    )
 
-    ax2.plot(100 * accuracies)
+    ax2.plot(100 * results.train.accuracy, label="train")
+    ax2.plot(100 * results.validation.accuracy, label="val")
     ax2.set_xlabel("epoch")
     ax2.set_ylabel("accuracy on validation set (%)")
+    ax2.legend(frameon=False)
+    last_acc = 100 * results.train.accuracy[-1]
+    ax2.annotate(f"{last_acc:.1f}%", (len(results.train.accuracy), last_acc), c="C0")
+    last_acc = 100 * results.validation.accuracy[-1]
+    ax2.annotate(
+        f"{last_acc:.1f}%", (len(results.validation.accuracy), last_acc), c="C1"
+    )
     ax2.set_ylim(0, 100)
 
 # %% [markdown]
@@ -180,71 +149,90 @@ cpcn_net = LinearCPCNetwork(
 )
 cpcn_net = cpcn_net.to(device)
 
-# %%
-cpcn_losses = np.zeros(n_epochs)
-cpcn_accuracies = np.zeros(n_epochs)
-cpcn_train_losses = np.zeros((n_epochs, len(train_loader)))
-
-cpcn_optimizer = torch.optim.Adam(cpcn_net.slow_parameters(), lr=0.001)
-
-# train a linear classifier on the output from the last hidden layer
-cpcn_classifier = torch.nn.Sequential(torch.nn.Linear(*dims[-2:]))
-cpcn_classifier_optimizer = torch.optim.Adam(cpcn_classifier.parameters(), lr=0.001)
-cpcn_classifier_criterion = torch.nn.MSELoss()
-
-# pbar = tqdm(range(n_epochs), desc="val: loss ?.??? acc ?.??")
-pbar = tqdm(range(n_epochs))
-for epoch in pbar:
-    # train
-    for i, (x, y) in enumerate(train_loader):
-        cpcn_net.forward_constrained(x, y)
-        loss = cpcn_net.pc_loss()
-
-        cpcn_net.calculate_weight_grad()
-        cpcn_classifier_optimizer.zero_grad()
-
-        # propagate through the classifier
-        cpcn_classifier_out = cpcn_classifier(cpcn_net.z[-2])
-        cpcn_classifier_loss = cpcn_classifier_criterion(cpcn_classifier_out, y)
-        cpcn_classifier_loss.backward()
-
-        cpcn_optimizer.step()
-        cpcn_classifier_optimizer.step()
-
-        cpcn_train_losses[epoch, i] = loss.item()
-
-    # evaluate
-    cpcn_losses[epoch], cpcn_accuracies[epoch] = evaluate(
-        cpcn_net, validation_loader, classifier=cpcn_classifier
-    )
-    # pbar.set_description(f"val: loss {losses[epoch]:.2g} acc {accuracies[epoch]:.2f}")
-    pbar.set_postfix(
-        {
-            "val_loss": f"{cpcn_losses[epoch]:.2g}",
-            "val_acc": f"{cpcn_accuracies[epoch]:.2f}",
-        }
-    )
-
-cpcn_train_losses = np.sum(cpcn_train_losses, axis=1) / len(train_loader.dataset)
+cpcn_results = train(
+    cpcn_net,
+    n_epochs,
+    train_loader,
+    validation_loader,
+    classifier="linear",
+    progress=tqdm,
+)
 
 # %% [markdown]
-# ## Show CPCN learning curves
+# ### Show CPCN learning curves
+
+with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
+    ax1.semilogy(results.train.pc_loss, label="train")
+    ax1.semilogy(results.validation.pc_loss, label="val")
+    ax1.set_xlabel("epoch")
+    ax1.set_ylabel("predictive-coding loss")
+    ax1.legend(frameon=False)
+    last_loss = results.train.pc_loss[-1]
+    ax1.annotate(f"{last_loss:.3f}", (len(results.train.pc_loss), last_loss), c="C0")
+    last_loss = results.validation.pc_loss[-1]
+    ax1.annotate(
+        f"{last_loss:.3f}", (len(results.validation.pc_loss), last_loss), c="C1"
+    )
+
+    ax2.plot(100 * results.train.accuracy, label="train")
+    ax2.plot(100 * results.validation.accuracy, label="val")
+    ax2.set_xlabel("epoch")
+    ax2.set_ylabel("accuracy on validation set (%)")
+    ax2.legend(frameon=False)
+    last_acc = 100 * results.train.accuracy[-1]
+    ax2.annotate(f"{last_acc:.1f}%", (len(results.train.accuracy), last_acc), c="C0")
+    last_acc = 100 * results.validation.accuracy[-1]
+    ax2.annotate(
+        f"{last_acc:.1f}%", (len(results.validation.accuracy), last_acc), c="C1"
+    )
+    ax2.set_ylim(0, 100)
 
 # %%
 with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
-    ax1.semilogy(train_losses, c="C0", ls="--", alpha=0.7, label="Whittington&Bogacz")
-    ax1.semilogy(losses, c="C1", ls="--", alpha=0.7)
+    ax1.semilogy(
+        results.train.pc_loss, c="C0", ls="--", alpha=0.7, label="Whittington&Bogacz"
+    )
+    ax1.semilogy(results.validation.pc_loss, c="C1", ls="--", alpha=0.7)
 
-    ax1.semilogy(cpcn_train_losses, c="C0", label="train")
-    ax1.semilogy(cpcn_losses, c="C1", label="val")
+    ax1.semilogy(cpcn_results.train.pc_loss, c="C0", label="train")
+    ax1.semilogy(cpcn_results.validation.pc_loss, c="C1", label="val")
+
+    last_loss = results.validation.pc_loss[-1]
+    ax1.annotate(
+        f"{last_loss:.3f}", (len(results.validation.pc_loss), last_loss), c="C1"
+    )
+    last_loss = cpcn_results.validation.pc_loss[-1]
+    ax1.annotate(
+        f"{last_loss:.3f}", (len(cpcn_results.validation.pc_loss), last_loss), c="C1"
+    )
+
     ax1.set_xlabel("epoch")
     ax1.set_ylabel("predictive-coding loss")
     ax1.legend(frameon=False)
 
-    ax2.plot(100 * accuracies, c="C0", ls="--", alpha=0.7, label="Whittington&Bogacz")
-    ax2.plot(100 * cpcn_accuracies, c="C0")
+    ax2.plot(
+        100 * results.train.accuracy,
+        c="C0",
+        ls="--",
+        alpha=0.7,
+        label="Whittington&Bogacz",
+    )
+    ax2.plot(100 * results.validation.accuracy, c="C1", ls="--", alpha=0.7)
+    ax2.plot(100 * cpcn_results.train.accuracy, c="C0", label="train")
+    ax2.plot(100 * cpcn_results.validation.accuracy, c="C1", label="val")
     ax2.set_xlabel("epoch")
-    ax2.set_ylabel("accuracy on validation set (%)")
+    ax2.set_ylabel("accuracy (%)")
+
+    last_acc = 100 * results.validation.accuracy[-1]
+    ax2.annotate(
+        f"{last_acc:.1f}%", (len(results.validation.accuracy), last_acc), c="C1"
+    )
+    last_acc = 100 * cpcn_results.validation.accuracy[-1]
+    ax2.annotate(
+        f"{last_acc:.1f}%", (len(cpcn_results.validation.accuracy), last_acc), c="C1"
+    )
+
+    ax2.legend(frameon=False)
     ax2.set_ylim(0, 100)
 
 # %%
