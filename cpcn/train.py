@@ -413,8 +413,30 @@ class Trainer:
             lambda ns, name=name: self._monitor(name, ns), condition
         )
 
+    def peek_sample(
+        self, name: str, vars: Sequence, condition: Optional[Callable] = None
+    ) -> "Trainer":
+        """Add per-sample monitoring.
+        
+        This is used to store values of parameters that change with each sample. The
+        values will be stored in `self.history` during calls to `self.run()`.
+
+        :param name: the name to be used in `self.history` for the stored values
+        :param vars: variables to track; these should be names of attributes of the
+            model under training
+        :param condition: condition to be fulfilled for the observer to be called; this
+            has signature (epoch: int, batch: int) -> bool; either all or none of the
+            samples in a batch are stored
+        """
+        if hasattr(self.history, name):
+            raise ValueError("monitor name already in use")
+        self._setup_history(name, vars, "sample")
+        return self.add_batch_observer(
+            lambda ns, name=name: self._sample_monitor(name, ns), condition
+        )
+
     def _monitor(self, name: str, ns: SimpleNamespace):
-        """Observer called to update per-epoch monitors."""
+        """Observer called to update per-epoch or per-batch monitors."""
         target_dict = getattr(self.history, name)
         target_dict["epoch"].append(ns.epoch)
         if "batch" in target_dict:
@@ -432,6 +454,30 @@ class Trainer:
             else:
                 target.append(value.clone().detach())
 
+    def _sample_monitor(self, name: str, ns: SimpleNamespace):
+        """Observer called to update per-sample monitors."""
+        target_dict = getattr(self.history, name)
+        for var, target in target_dict.items():
+            if var in ["epoch", "batch", "sample"]:
+                continue
+
+            var, *parts = var.split(":")
+            value = getattr(ns.net, var)
+            if len(parts) > 0:
+                # this is part of a multi-layer variable
+                value = value[int(parts[-1])]
+
+            # handle batch size of 1
+            if value.ndim == 1:
+                value = [value]
+            value = [_.clone().detach() for _ in value]
+            target.extend(value)
+
+        batch_size = len(value)
+        target_dict["epoch"].extend(batch_size * [ns.epoch])
+        target_dict["batch"].extend(batch_size * [ns.batch])
+        target_dict["sample"].extend(list(range(batch_size)))
+
     def _setup_history(self, name: str, vars: Sequence, type: str):
         """Set up storage for a monitor."""
         storage = {}
@@ -445,8 +491,10 @@ class Trainer:
                 storage[var] = None
 
         storage["epoch"] = []
-        if type == "batch":
+        if type in ["batch", "sample"]:
             storage["batch"] = []
+            if type == "sample":
+                storage["sample"] = []
         setattr(self.history, name, storage)
 
     def _reset_history(self):
@@ -461,12 +509,14 @@ class Trainer:
         for name in self.history.__dict__:
             history = getattr(self.history, name)
             for var in history:
-                if var not in ["epoch", "batch"]:
+                if var not in ["epoch", "batch", "sample"]:
                     history[var] = torch.stack(history[var])
 
             history["epoch"] = torch.IntTensor(history["epoch"])
             if "batch" in history:
                 history["batch"] = torch.IntTensor(history["batch"])
+            if "sample" in history:
+                history["sample"] = torch.IntTensor(history["sample"])
 
 
 def evaluate(
