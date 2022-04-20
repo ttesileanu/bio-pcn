@@ -101,14 +101,9 @@ cpcn_net = LinearCPCNetwork(
 )
 cpcn_net = cpcn_net.to(device)
 
-cpcn_results = train(
-    cpcn_net,
-    n_epochs,
-    dataset["train"],
-    dataset["validation"],
-    classifier="linear",
-    progress=tqdm,
-)
+cpcn_trainer = Trainer(cpcn_net, dataset["train"], dataset["validation"])
+cpcn_trainer.set_classifier("linear")
+cpcn_results = cpcn_trainer.run(n_epochs, progress=tqdm)
 
 # %% [markdown]
 # ### Show CPCN learning curves
