@@ -53,8 +53,6 @@ def evaluate(
         output from either the classifier (if given) or `net.forward()`, using the given
         `accuracy_fct()`
     """
-    n = 0
-    n_correct = 0
     loss = []
     accuracy = []
     for x, y in loader:
