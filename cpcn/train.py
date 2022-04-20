@@ -384,17 +384,43 @@ class Trainer:
         :param condition: condition to be fulfilled for the observer to be called; this
             has signature (epoch: int) -> bool
         """
-        self._setup_epoch_history(name, vars)
+        if hasattr(self.history, name):
+            raise ValueError("monitor name already in use")
+        self._setup_history(name, vars, "epoch")
         return self.add_epoch_observer(
-            lambda ns, name=name: self._epoch_monitor(name, ns), condition
+            lambda ns, name=name: self._monitor(name, ns), condition
         )
 
-    def _epoch_monitor(self, name: str, ns: SimpleNamespace):
+    def peek_batch(
+        self, name: str, vars: Sequence, condition: Optional[Callable] = None
+    ) -> "Trainer":
+        """Add per-batch monitoring.
+        
+        This is used to store values of parameters after each batch (or after those
+        batches obeying a condition). The values will be stored in `self.history` during
+        calls to `self.run()`.
+
+        :param name: the name to be used in `self.history` for the stored values
+        :param vars: variables to track; these should be names of attributes of the
+            model under training
+        :param condition: condition to be fulfilled for the observer to be called; this
+            has signature (epoch: int, batch: int) -> bool
+        """
+        if hasattr(self.history, name):
+            raise ValueError("monitor name already in use")
+        self._setup_history(name, vars, "batch")
+        return self.add_batch_observer(
+            lambda ns, name=name: self._monitor(name, ns), condition
+        )
+
+    def _monitor(self, name: str, ns: SimpleNamespace):
         """Observer called to update per-epoch monitors."""
         target_dict = getattr(self.history, name)
         target_dict["epoch"].append(ns.epoch)
+        if "batch" in target_dict:
+            target_dict["batch"].append(ns.batch)
         for var, target in target_dict.items():
-            if var == "epoch":
+            if var in ["epoch", "batch"]:
                 continue
 
             var, *parts = var.split(":")
@@ -406,8 +432,8 @@ class Trainer:
             else:
                 target.append(value.clone().detach())
 
-    def _setup_epoch_history(self, name: str, vars: Sequence):
-        """Set up storage for a per-epoch monitor."""
+    def _setup_history(self, name: str, vars: Sequence, type: str):
+        """Set up storage for a monitor."""
         storage = {}
         for var in vars:
             value = getattr(self.net, var)
@@ -419,6 +445,8 @@ class Trainer:
                 storage[var] = None
 
         storage["epoch"] = []
+        if type == "batch":
+            storage["batch"] = []
         setattr(self.history, name, storage)
 
     def _reset_history(self):
@@ -433,10 +461,12 @@ class Trainer:
         for name in self.history.__dict__:
             history = getattr(self.history, name)
             for var in history:
-                if var != "epoch":
+                if var not in ["epoch", "batch"]:
                     history[var] = torch.stack(history[var])
 
             history["epoch"] = torch.IntTensor(history["epoch"])
+            if "batch" in history:
+                history["batch"] = torch.IntTensor(history["batch"])
 
 
 def evaluate(
