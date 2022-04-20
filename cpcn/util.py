@@ -204,6 +204,7 @@ class Trainer:
             # call any epoch observers
             epoch_ns = SimpleNamespace(
                 epoch=epoch,
+                net=self.net,
                 epoch_train_loss=epoch_train_loss,
                 epoch_train_accuracy=epoch_train_accuracy,
                 epoch_val_loss=epoch_val_loss,
@@ -311,6 +312,7 @@ class Trainer:
             observer(ns: SimpleNamespace)
         where the `SimpleNamespace` contains
             epoch:          the index of the epoch that just ended
+            net:            the network that is being optimized
             train_loss:     (predictive-coding) loss on training set
             val_loss:       (predictive-coding) loss on validation set
             train_accuracy: accuracy on training set
