@@ -333,6 +333,36 @@ class Trainer:
         self.batch_observers.append((observer, condition, profile))
         return self
 
+    def set_accuracy_fct(self, accuracy_fct: Callable) -> "Trainer":
+        """Set the function used to calculate accuracy scores.
+        
+        This is called as `accuracy_fct(y, y_pred)`, where `y` is ground truth, `y_pred`
+        is prediction.
+        """
+        self.accuracy_fct = accuracy_fct
+        return self
+
+    def set_classifier_optimizer(
+        self, optimizer: torch.optim.Optimizer, **kwargs
+    ) -> "Trainer":
+        """Set the optimizer to be used for training the classifier.
+        
+        More specifically, this sets a callable which creates the optimizer (typically a
+        class, like `torch.optim.Adam`). Additional arguments are stored, to be passed
+        to `optimizer()` at `run` time.
+
+        :param optimizer: the callable that generates the optimizer
+        :param **kwargs: additional arguments to pass to the `optimizer()` call
+        """
+        self.classifier_optim_class = optimizer
+        self.classifier_optim_kwargs = kwargs
+        return self
+
+    def set_classifier_criterion(self, criterion=Callable) -> "Trainer":
+        """Set the objective fucntion for training the classifier."""
+        self.classifier_criterion = criterion
+        return self
+
 
 def evaluate(
     net,
