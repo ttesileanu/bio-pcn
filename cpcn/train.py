@@ -1,7 +1,7 @@
 """Define utilities for training predictive-coding models. """
 
 from types import SimpleNamespace
-from typing import Optional, Callable, Iterable, Union
+from typing import Optional, Callable, Iterable, Union, Sequence
 
 import torch
 import numpy as np
@@ -16,6 +16,7 @@ class Trainer:
     :param net: the network to train
     :param train_loader: data loader for training set
     :param validation_loader: data loader for validation set
+    :param history: history from last call to `run()`
     :param optimizer_class: callable to create the optimizer to use; default: Adam
     :param optimizer_kwargs: keyword arguments to pass to the `optimizer()`
     :param accuracy_fct: function used to calculate accuracy; called as
@@ -61,6 +62,8 @@ class Trainer:
         self.epoch_observers = []
         self.batch_observers = []
 
+        self.history = SimpleNamespace()
+
     def run(
         self, n_epochs: int, progress: Optional[Callable] = None
     ) -> SimpleNamespace:
@@ -94,6 +97,7 @@ class Trainer:
         else:
             epoch_range = range(n_epochs)
 
+        self._reset_history()
         for epoch in epoch_range:
             # train
             batch_train_loss = []
@@ -191,6 +195,8 @@ class Trainer:
                         "val_acc": f"{epoch_val_accuracy:.2f}",
                     }
                 )
+
+        self._coalesce_history()
 
         # convert to Numpy
         for ns in [res.train, res.validation]:
@@ -362,6 +368,75 @@ class Trainer:
         """Set the objective fucntion for training the classifier."""
         self.classifier_criterion = criterion
         return self
+
+    def peek_epoch(
+        self, name: str, vars: Sequence, condition: Optional[Callable] = None
+    ) -> "Trainer":
+        """Add per-epoch monitoring.
+        
+        This is used to store values of parameters after each epoch (or after those
+        epochs obeying a condition). The values will be stored in `self.history` during
+        calls to `self.run()`.
+
+        :param name: the name to be used in `self.history` for the stored values
+        :param vars: variables to track; these should be names of attributes of the
+            model under training
+        :param condition: condition to be fulfilled for the observer to be called; this
+            has signature (epoch: int) -> bool
+        """
+        self._setup_epoch_history(name, vars)
+        return self.add_epoch_observer(
+            lambda ns, name=name: self._epoch_monitor(name, ns), condition
+        )
+
+    def _epoch_monitor(self, name: str, ns: SimpleNamespace):
+        """Observer called to update per-epoch monitors."""
+        target_dict = getattr(self.history, name)
+        target_dict["epoch"].append(ns.epoch)
+        for var, target in target_dict.items():
+            if var == "epoch":
+                continue
+
+            var, *parts = var.split(":")
+            value = getattr(ns.net, var)
+            if len(parts) > 0:
+                # this is part of a multi-layer variable
+                k = int(parts[-1])
+                target.append(value[k].clone().detach())
+            else:
+                target.append(value.clone().detach())
+
+    def _setup_epoch_history(self, name: str, vars: Sequence):
+        """Set up storage for a per-epoch monitor."""
+        storage = {}
+        for var in vars:
+            value = getattr(self.net, var)
+            if isinstance(value, (list, tuple)):
+                # this is a multi-layer variable
+                for k in range(len(value)):
+                    storage[var + ":" + str(k)] = None
+            else:
+                storage[var] = None
+
+        storage["epoch"] = []
+        setattr(self.history, name, storage)
+
+    def _reset_history(self):
+        """Reset history storage (used before a `run()`)."""
+        for name in self.history.__dict__:
+            history = getattr(self.history, name)
+            for var in history:
+                history[var] = []
+
+    def _coalesce_history(self):
+        """Coalesce history into tensor form."""
+        for name in self.history.__dict__:
+            history = getattr(self.history, name)
+            for var in history:
+                if var != "epoch":
+                    history[var] = torch.stack(history[var])
+
+            history["epoch"] = torch.IntTensor(history["epoch"])
 
 
 def evaluate(
