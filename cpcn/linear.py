@@ -1,5 +1,6 @@
 """ Define the linear constrained-predictive coding network. """
 
+from types import SimpleNamespace
 from typing import Sequence, Union, Optional, Callable
 
 import torch
@@ -129,8 +130,12 @@ class LinearCPCNetwork:
         return x
 
     def forward_constrained(
-        self, x: torch.Tensor, y: torch.Tensor, pc_loss_profile: bool = False
-    ) -> Optional[Sequence]:
+        self,
+        x: torch.Tensor,
+        y: torch.Tensor,
+        pc_loss_profile: bool = False,
+        latent_profile: bool = False,
+    ) -> SimpleNamespace:
         """Do a forward pass where both input and output values are fixed.
 
         This runs a number of iterations (as set by `self.z_it`) of the fast optimizer,
@@ -139,11 +144,22 @@ class LinearCPCNetwork:
 
         :param x: input sample
         :param y: output sample
-        :param pc_loss_profile: if true, evaluates and returns the predictive-coding
-            loss at every step; see `self.pc_loss()`
+        :param pc_loss_profile: if true, the evolution of the predictive-coding loss
+            during the optimization is returned in the output namespace, under the name
+            `pc_loss`; see `self.pc_loss()`
+        :param latent_profile: if true, the evolution of the latent variables during the
+            optimization is returned as `latent` in the output, with subfields for each
+            variable, e.g., `latent.z`, `latent.n`, etc.; the values are stored after
+            each optimizer step, and they are stored as a list of tensors, one for each
+            layer, of shape `[n_it, batch_size, n_units]`; note that this output will
+            always have a batch index, even if the input and output samples do not
         :return: if `pc_loss_profile` is true, the predictive-coding loss evaluated
             before every optimization step; otherwise, `None`
         """
+        assert x.ndim == y.ndim
+        if x.ndim > 1:
+            assert x.shape[0] == y.shape[0]
+
         # we calculate gradients manually
         with torch.no_grad():
             # start with a simple forward pass to initialize the layer values
@@ -158,17 +174,48 @@ class LinearCPCNetwork:
 
             # iterate until convergence
             if pc_loss_profile:
-                losses = np.zeros(self.z_it)
+                losses = torch.zeros(self.z_it)
+            if latent_profile:
+                batch_size = x.shape[0] if x.ndim > 1 else 1
+                latent = SimpleNamespace()
+                latent.z = [
+                    torch.zeros((self.z_it, batch_size, dim)) for dim in self.pyr_dims
+                ]
+                latent.a = [
+                    torch.zeros((self.z_it, batch_size, dim))
+                    for dim in self.pyr_dims[1:-1]
+                ]
+                latent.b = [
+                    torch.zeros((self.z_it, batch_size, dim))
+                    for dim in self.pyr_dims[1:-1]
+                ]
+                latent.n = [
+                    torch.zeros((self.z_it, batch_size, dim)) for dim in self.inter_dims
+                ]
+
+            self.calculate_currents()
             for i in range(self.z_it):
-                self.calculate_currents()
                 self.calculate_z_grad()
                 fast_optimizer.step()
+                self.calculate_currents()
 
                 if pc_loss_profile:
                     losses[i] = self.pc_loss().item()
+                if latent_profile:
+                    for k, crt_z in enumerate(self.z):
+                        latent.z[k][i, :, :] = crt_z
+                    for var in ["a", "b", "n"]:
+                        crt_storage = getattr(latent, var)
+                        for k, crt_values in enumerate(getattr(self, var)):
+                            crt_storage[k][i, :, :] = crt_values
 
+        ns = SimpleNamespace()
         if pc_loss_profile:
-            return losses
+            ns.pc_loss = losses
+        if latent_profile:
+            ns.latent = latent
+
+        return ns
 
     def calculate_weight_grad(self):
         """Calculate gradients for slow (weight) variables.

@@ -1,5 +1,6 @@
 """ Implement the predictive-coding network from Whittington & Bogacz. """
 
+from types import SimpleNamespace
 from typing import Sequence, Union, Callable
 
 import torch
@@ -82,7 +83,13 @@ class PCNetwork(object):
 
         return x
 
-    def forward_constrained(self, x: torch.Tensor, y: torch.Tensor) -> Sequence:
+    def forward_constrained(
+        self,
+        x: torch.Tensor,
+        y: torch.Tensor,
+        pc_loss_profile: bool = False,
+        latent_profile: bool = False,
+    ) -> SimpleNamespace:
         """ Do a forward pass where both input and output values are fixed.
 
         This runs a number of iterations (as set by `self.it_inference`) of the fast
@@ -91,8 +98,22 @@ class PCNetwork(object):
 
         :param x: input sample
         :param y: output sample
-        :return: loss evaluated before every optimization step
+        :param pc_loss_profile: if true, the evolution of the predictive-coding loss
+            during the optimization is returned in the output namespace, under the name
+            `pc_loss`
+        :param latent_profile: if true, the evolution of the latent variables during the
+            optimization is returned in the output namespace, under the name `latent.z`;
+            the values are stored after each optimizer step, and they are stored as a
+            list of tensors, one for each layer, of shape `[n_it, batch_size, n_units]`;
+            note that this output will always have a batch index, even if the input and
+            output samples do not
+        :return: namespace with results; this is empty if both `loss_profile` and
+            `latent_profile` are false
         """
+        assert x.ndim == y.ndim
+        if x.ndim > 1:
+            assert x.shape[0] == y.shape[0]
+
         # start with a simple forward pass to initialize the layer values
         with torch.no_grad():
             self.forward(x)
@@ -114,8 +135,14 @@ class PCNetwork(object):
             W.requires_grad = False
             b.requires_grad = False
 
+        if latent_profile:
+            batch_size = x.shape[0] if x.ndim > 1 else 1
+            latent = [
+                torch.zeros((self.it_inference, batch_size, dim)) for dim in self.dims
+            ]
+
         # iterate until convergence
-        losses = np.zeros(self.it_inference)
+        losses = torch.zeros(self.it_inference)
         for i in range(self.it_inference):
             # this is about 10% faster than fast_optimizer.zero_grad()
             for param in self.fast_parameters():
@@ -128,12 +155,22 @@ class PCNetwork(object):
 
             losses[i] = loss.item()
 
+            if latent_profile:
+                for k, crt_z in enumerate(self.z):
+                    latent[k][i, :, :] = crt_z
+
         # reset requires_grad
         for W, b in zip(self.W, self.b):
             W.requires_grad = True
             b.requires_grad = True
 
-        return losses
+        ns = SimpleNamespace()
+        if pc_loss_profile:
+            ns.pc_loss = losses
+        if latent_profile:
+            ns.latent = SimpleNamespace(z=latent)
+
+        return ns
 
     def loss(self) -> torch.Tensor:
         """ Calculate the loss given the current values of the random variables. """

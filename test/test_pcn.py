@@ -390,37 +390,114 @@ def test_training_with_batches_of_nontrivial_size():
     assert torch.allclose(out, out_batch)
 
 
-def test_forward_constrained_returns_sequence_of_correct_length(net):
-    losses = net.forward_constrained(
+def test_forward_constrained_returns_empty_namespace_by_default(net):
+    ns = net.forward_constrained(
         torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4])
     )
+    assert len(ns.__dict__) == 0
 
-    assert len(losses) == net.it_inference
 
-
-def test_forward_constrained_returns_sequence_of_positive_numbers(net):
-    losses = net.forward_constrained(
-        torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4])
+def test_forward_constrained_loss_profile_is_sequence_of_correct_length(net):
+    ns = net.forward_constrained(
+        torch.FloatTensor([-0.1, 0.2, 0.4]),
+        torch.FloatTensor([0.3, -0.4]),
+        pc_loss_profile=True,
     )
 
-    assert min(losses) > 0
+    assert len(ns.pc_loss) == net.it_inference
 
 
-def test_forward_constrained_returns_approximately_non_increasing_sequence(net):
-    losses = net.forward_constrained(
-        torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4])
+def test_forward_constrained_loss_profile_is_sequence_of_positive_numbers(net):
+    ns = net.forward_constrained(
+        torch.FloatTensor([-0.1, 0.2, 0.4]),
+        torch.FloatTensor([0.3, -0.4]),
+        pc_loss_profile=True,
     )
 
-    for _, __ in zip(losses[:-1], losses[1:]):
+    assert min(ns.pc_loss) > 0
+
+
+def test_forward_constrained_loss_profile_is_approximately_non_increasing_sequence(net):
+    ns = net.forward_constrained(
+        torch.FloatTensor([-0.1, 0.2, 0.4]),
+        torch.FloatTensor([0.3, -0.4]),
+        pc_loss_profile=True,
+    )
+
+    for _, __ in zip(ns.pc_loss[:-1], ns.pc_loss[1:]):
         assert (_ >= __) or _ == pytest.approx(__)
 
 
-def test_forward_constrained_returns_sequence_with_last_elem_smaller_than_first(net):
-    losses = net.forward_constrained(
-        torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4])
+def test_forward_constrained_loss_profile_has_last_elem_smaller_than_first(net):
+    ns = net.forward_constrained(
+        torch.FloatTensor([-0.1, 0.2, 0.4]),
+        torch.FloatTensor([0.3, -0.4]),
+        pc_loss_profile=True,
     )
 
-    assert losses[-1] < losses[0]
+    assert ns.pc_loss[-1] < ns.pc_loss[0]
+
+
+def test_forward_constrained_latent_profile_batch_index_added(net):
+    ns = net.forward_constrained(
+        torch.FloatTensor([-0.1, 0.2, 0.4]),
+        torch.FloatTensor([0.3, -0.4]),
+        latent_profile=True,
+    )
+    for z in ns.latent.z:
+        assert z.ndim == 3
+        assert z.shape[1] == 1
+
+
+def test_forward_constrained_latent_profile_has_correct_length(net):
+    ns = net.forward_constrained(
+        torch.FloatTensor([-0.1, 0.2, 0.4]),
+        torch.FloatTensor([0.3, -0.4]),
+        latent_profile=True,
+    )
+    for z in ns.latent.z:
+        assert len(z) == net.it_inference
+
+
+def test_forward_constrained_latent_profile_first_layer_is_input(net):
+    x = torch.FloatTensor([-0.1, 0.2, 0.4])
+    y = torch.FloatTensor([0.3, -0.4])
+    ns = net.forward_constrained(x, y, latent_profile=True)
+    assert torch.max(torch.abs(ns.latent.z[0] - x)) < 1e-5
+
+
+def test_forward_constrained_latent_profile_last_layer_is_output(net):
+    x = torch.FloatTensor([-0.1, 0.2, 0.4])
+    y = torch.FloatTensor([0.3, -0.4])
+    ns = net.forward_constrained(x, y, latent_profile=True)
+    assert torch.max(torch.abs(ns.latent.z[-1] - y)) < 1e-5
+
+
+def test_forward_constrained_latent_profile_row_matches_shorter_run(net):
+    x = torch.FloatTensor([-0.1, 0.2, 0.4])
+    y = torch.FloatTensor([0.3, -0.4])
+    ns = net.forward_constrained(x, y, latent_profile=True)
+
+    new_it = 2
+    net.it_inference = new_it
+    net.forward_constrained(x, y)
+
+    for i, z in enumerate(ns.latent.z):
+        assert torch.allclose(net.z[i], z[new_it - 1, 0])
+
+
+def test_forward_constrained_latent_profile_with_batch(net):
+    x = torch.FloatTensor([[-0.1, 0.2, 0.4], [0.5, 0.3, 0.2]])
+    y = torch.FloatTensor([[0.3, -0.4], [0.1, 0.2]])
+    ns = net.forward_constrained(x, y, latent_profile=True)
+
+    for k in range(len(x)):
+        crt_x = x[k]
+        crt_y = y[k]
+        crt_ns = net.forward_constrained(crt_x, crt_y, latent_profile=True)
+
+        for z1, z2 in zip(ns.latent.z, crt_ns.latent.z):
+            assert torch.allclose(z1[:, [k], :], z2)
 
 
 def test_to_returns_self(net):

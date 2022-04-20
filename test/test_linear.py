@@ -672,3 +672,135 @@ def test_weight_gradients_match_autograd_from_loss(net, var):
 
     for from_manual, from_loss in zip(manual_grads, loss_grads):
         assert torch.allclose(from_manual, from_loss, rtol=1e-2, atol=1e-5)
+
+
+def test_forward_constrained_returns_empty_namespace_by_default(net):
+    x = torch.FloatTensor([0.2, -0.5, 0.3])
+    y = torch.FloatTensor([0.5, -0.3])
+    ns = net.forward_constrained(x, y)
+
+    assert len(ns.__dict__) == 0
+
+
+def test_forward_constrained_loss_profile_is_sequence_of_correct_length(net):
+    x = torch.FloatTensor([0.2, -0.5, 0.3])
+    y = torch.FloatTensor([0.5, -0.3])
+    ns = net.forward_constrained(x, y, pc_loss_profile=True)
+
+    assert len(ns.pc_loss) == net.z_it
+
+
+def test_forward_constrained_loss_profile_is_sequence_of_positive_numbers(net):
+    x = torch.FloatTensor([0.2, -0.5, 0.3])
+    y = torch.FloatTensor([0.5, -0.3])
+    ns = net.forward_constrained(x, y, pc_loss_profile=True)
+
+    assert min(ns.pc_loss) > 0
+
+
+def test_forward_constrained_latent_profile_batch_index_added(net):
+    x = torch.FloatTensor([0.2, -0.5, 0.3])
+    y = torch.FloatTensor([0.5, -0.3])
+    ns = net.forward_constrained(x, y, latent_profile=True)
+    for var in ns.latent.__dict__:
+        crt_data = getattr(ns.latent, var)
+        for x in crt_data:
+            assert x.ndim == 3
+            assert x.shape[1] == 1
+
+
+def test_forward_constrained_latent_profile_has_z_a_b_n(net):
+    x = torch.FloatTensor([0.2, -0.5, 0.3])
+    y = torch.FloatTensor([0.5, -0.3])
+    ns = net.forward_constrained(x, y, latent_profile=True)
+
+    assert set(ns.latent.__dict__.keys()) == {"z", "a", "b", "n"}
+
+
+@pytest.mark.parametrize("var", ["z", "a", "b", "n"])
+def test_forward_constrained_latent_profile_has_correct_length(net, var):
+    x = torch.FloatTensor([0.2, -0.5, 0.3])
+    y = torch.FloatTensor([0.5, -0.3])
+    ns = net.forward_constrained(x, y, latent_profile=True)
+    crt_data = getattr(ns.latent, var)
+    for x in crt_data:
+        assert len(x) == net.z_it
+
+
+def test_forward_constrained_latent_profile_first_layer_of_z_is_input(net):
+    x = torch.FloatTensor([-0.1, 0.2, 0.4])
+    y = torch.FloatTensor([0.3, -0.4])
+    ns = net.forward_constrained(x, y, latent_profile=True)
+    assert torch.max(torch.abs(ns.latent.z[0] - x)) < 1e-5
+
+
+def test_forward_constrained_latent_profile_last_layer_of_z_is_output(net):
+    x = torch.FloatTensor([-0.1, 0.2, 0.4])
+    y = torch.FloatTensor([0.3, -0.4])
+    ns = net.forward_constrained(x, y, latent_profile=True)
+    assert torch.max(torch.abs(ns.latent.z[-1] - y)) < 1e-5
+
+
+@pytest.mark.parametrize("var", ["z", "a", "b", "n"])
+def test_forward_constrained_latent_profile_row_matches_shorter_run(net, var):
+    x = torch.FloatTensor([-0.1, 0.2, 0.4])
+    y = torch.FloatTensor([0.3, -0.4])
+    ns = net.forward_constrained(x, y, latent_profile=True)
+
+    new_it = net.z_it // 2
+    net.z_it = new_it
+    net.forward_constrained(x, y)
+
+    long_data = getattr(ns.latent, var)
+    for i, x in enumerate(long_data):
+        short_data = getattr(net, var)
+        assert torch.allclose(short_data[i], x[new_it - 1, 0])
+
+
+@pytest.mark.parametrize("var", ["z", "a", "b", "n"])
+def test_forward_constrained_latent_profile_row_matches_shorter_run_interdims(
+    net_inter_dims, var
+):
+    net = net_inter_dims
+    x = torch.FloatTensor([-0.1, 0.2, 0.4])
+    y = torch.FloatTensor([0.3, -0.4])
+    ns = net.forward_constrained(x, y, latent_profile=True)
+
+    new_it = net.z_it // 2
+    net.z_it = new_it
+    net.forward_constrained(x, y)
+
+    long_data = getattr(ns.latent, var)
+    for i, x in enumerate(long_data):
+        short_data = getattr(net, var)
+        assert torch.allclose(short_data[i], x[new_it - 1, 0])
+
+
+@pytest.mark.parametrize("var", ["z", "a", "b", "n"])
+def test_forward_constrained_latent_profile_with_batch(net, var):
+    x = torch.FloatTensor([[-0.1, 0.2, 0.4], [0.5, 0.3, 0.2]])
+    y = torch.FloatTensor([[0.3, -0.4], [0.1, 0.2]])
+    ns = net.forward_constrained(x, y, latent_profile=True)
+
+    long_data = getattr(ns.latent, var)
+    for k in range(len(x)):
+        crt_x = x[k]
+        crt_y = y[k]
+        crt_ns = net.forward_constrained(crt_x, crt_y, latent_profile=True)
+
+        short_data = getattr(crt_ns.latent, var)
+        for x1, x2 in zip(long_data, short_data):
+            assert torch.allclose(x1[:, [k], :], x2, rtol=1e-3, atol=1e-5)
+
+
+@pytest.mark.parametrize("var", ["a", "b", "n"])
+def test_currents_are_consistent_with_z_after_forward_constraint(net, var):
+    x = torch.FloatTensor([-0.1, 0.2, 0.4])
+    y = torch.FloatTensor([0.3, -0.4])
+    net.forward_constrained(x, y)
+
+    old = [_.clone().detach() for _ in getattr(net, var)]
+    net.calculate_currents()
+
+    for a, b in zip(old, getattr(net, var)):
+        assert torch.allclose(a, b)
