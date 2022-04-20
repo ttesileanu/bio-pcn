@@ -11,7 +11,7 @@ import torch
 
 from tqdm.notebook import tqdm
 
-from cpcn import LinearCPCNetwork, PCNetwork, load_mnist, train
+from cpcn import LinearCPCNetwork, PCNetwork, load_mnist, Trainer
 
 # %% [markdown]
 # ## Setup
@@ -46,14 +46,9 @@ net = PCNetwork(
 )
 net = net.to(device)
 
-results = train(
-    net,
-    n_epochs,
-    dataset["train"],
-    dataset["validation"],
-    classifier="linear",
-    progress=tqdm,
-)
+trainer = Trainer(net, dataset["train"], dataset["validation"])
+trainer.set_classifier("linear")
+results = trainer.run(n_epochs, progress=tqdm)
 
 # %% [markdown]
 # ### Show PCN learning curves

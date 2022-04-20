@@ -69,34 +69,14 @@ def evaluate(
     return loss, accuracy
 
 
-def train(
-    net,
-    n_epochs: int,
-    train_loader: Iterable,
-    validation_loader: Iterable,
-    optimizer: Callable = torch.optim.Adam,
-    optimizer_kwargs: Optional[dict] = None,
-    accuracy_fct: Callable = one_hot_accuracy,
-    classifier: Union[None, str, Callable] = None,
-    classifier_optim: Callable = torch.optim.Adam,
-    classifier_optim_kwargs: Optional[dict] = None,
-    classifier_criterion: Optional[Callable] = None,
-    classifier_dim: int = -2,
-    per_batch: bool = False,
-    progress: Optional[Callable] = None,
-    reporter: Optional[Callable] = None,
-) -> SimpleNamespace:
-    """Train a (constrained or not) predictive-coding network.
+class Trainer:
+    """A class for training (constrained or not) predictive-coding networks.
     
-    This uses `net.forward_constrained()` to set the latent variables given input and
-    output samples, then uses `net.calculate_weight_grad()` to calculate gradients for
-    the optimizer.
-
+    Attributes
     :param net: the network to train
-    :param n_epochs: number of tarining epochs
     :param train_loader: data loader for training set
     :param validation_loader: data loader for validation set
-    :param optimizer: callable to create the optimizer to use; default: Adam
+    :param optimizer_class: callable to create the optimizer to use; default: Adam
     :param optimizer_kwargs: keyword arguments to pass to the `optimizer()`
     :param accuracy_fct: function used to calculate accuracy; called as
         `accuracy_fct(y, y_pred)`, where `y` is ground truth, `y_pred` is prediction
@@ -105,138 +85,245 @@ def train(
         also be the string "linear", in which case a linear layer of appropriate input
         and ouptut dimensions is used; if it is not provided (or set to `None`), the
         output from `net.forward()` is used
-    :param classifier_optim: callable to create the optimizer for the classifier
+    :param classifier_optim_class: callable to create the optimizer for the classifier
     :param classifier_optim_kwargs: keyword arguments to pass to `classifier_optim()`
     :param classifier_criterion: objective fucntion for training classifier; default:
         `MSELoss()`
     :param classifier_dim: which layer of `net` to pass into the classifier
-    :param per_batch: if true, losses and accuracies are returned for each batch; if
-        false, they are averaged over the batches to return one value for each epoch
-    :param progress: progress indicator; should have `tqdm` interface
-    :param reporter: callback to call after each epoch, as `reporter(epoch_results)`,
-        where `epoch_results` is a namespace with members `epoch`, `epoch_train_loss`,
-        `epoch_train_accuracy`, `epoch_val_loss`, `epoch_val_accuracy`
-    :return: a namespace with the members `train` and `validation`, each containing
-        two Numpy arrays, `pc_loss` and `accuracy`.
+    :param epoch_observers: list of tuples `(observer, condition)`; see
+        `add_epoch_observer()`
     """
-    # handle some defaults
-    if optimizer_kwargs is None:
-        optimizer_kwargs = {}
-    if classifier_optim_kwargs is None:
-        classifier_optim_kwargs = {}
 
-    res = SimpleNamespace(train=SimpleNamespace(), validation=SimpleNamespace())
+    def __init__(self, net, train_loader: Iterable, validation_loader: Iterable):
+        """Initialize the trainer.
+        
+        :param net: the network to train
+        :param train_loader: data loader for training set
+        :param validation_loader: data loader for validation set
+        """
+        self.net = net
+        self.train_loader = train_loader
+        self.validation_loader = validation_loader
 
-    res.train.pc_loss = []
-    res.train.accuracy = []
+        self.optimizer_class = torch.optim.Adam
+        self.optimizer_kwargs = {}
 
-    res.validation.pc_loss = []
-    res.validation.accuracy = []
+        self.accuracy_fct = one_hot_accuracy
 
-    optimizer = optimizer(net.slow_parameters(), **optimizer_kwargs)
+        self.classifier = None
+        self.classifier_optim_class = torch.optim.Adam
+        self.classifier_optim_kwargs = {}
+        self.classifier_criterion = None
+        self.classifier_dim = -2
 
-    if classifier is not None:
-        if isinstance(classifier, str):
-            if classifier == "linear":
-                if hasattr(net, "dims"):
-                    dims = net.dims
-                else:
-                    dims = net.pyr_dims
-                classifier = torch.nn.Sequential(
-                    torch.nn.Linear(dims[classifier_dim], dims[-1])
-                )
-            else:
-                raise ValueError("Invalid classifier type")
+        self.epoch_observers = []
 
-        if classifier_criterion is None:
-            classifier_criterion = torch.nn.MSELoss()
+    def run(
+        self, n_epochs: int, progress: Optional[Callable] = None
+    ) -> SimpleNamespace:
+        """Run the training.
+        
+        :param n_epochs: number of training epochs
+        :param progress: progress indicator; should have `tqdm` interface
+        """
+        res = SimpleNamespace(train=SimpleNamespace(), validation=SimpleNamespace())
 
-        classifier_optim = classifier_optim(
-            classifier.parameters(), **classifier_optim_kwargs
+        res.train.pc_loss = []
+        res.train.accuracy = []
+
+        res.validation.pc_loss = []
+        res.validation.accuracy = []
+
+        optimizer = self.optimizer_class(
+            self.net.slow_parameters(), **self.optimizer_kwargs
         )
 
-    if progress is not None:
-        epoch_range = progress(range(n_epochs))
-    else:
-        epoch_range = range(n_epochs)
+        if self.classifier is not None:
+            if self.classifier_criterion is None:
+                self.classifier_criterion = torch.nn.MSELoss()
 
-    for epoch in epoch_range:
-        # train
-        batch_train_loss = []
-        batch_train_accuracy = []
-        for i, (x, y) in enumerate(train_loader):
-            # train main net
-            net.forward_constrained(x, y)
-            pc_loss = net.pc_loss()
+            classifier_optim = self.classifier_optim_class(
+                self.classifier.parameters(), **self.classifier_optim_kwargs
+            )
 
-            net.calculate_weight_grad()
-            optimizer.step()
-
-            # train classifier, if we have one
-            y_pred = net.forward(x)
-            if classifier is not None:
-                classifier_optim.zero_grad()
-
-                y_pred = classifier(net.z[classifier_dim])
-                classifier_loss = classifier_criterion(y_pred, y)
-                classifier_loss.backward()
-                classifier_optim.step()
-
-            batch_train_loss.append(pc_loss.item())
-            batch_train_accuracy.append(accuracy_fct(y_pred, y))
-
-        # evaluate performance on validation set
-        batch_val_loss, batch_val_accuracy = evaluate(
-            net,
-            validation_loader,
-            accuracy_fct=accuracy_fct,
-            classifier=classifier,
-            classifier_dim=classifier_dim,
-        )
-
-        # store loss and accuracy values
-        epoch_train_loss = np.mean(batch_train_loss)
-        epoch_train_accuracy = np.mean(batch_train_accuracy)
-        epoch_val_loss = np.mean(batch_val_loss)
-        epoch_val_accuracy = np.mean(batch_val_accuracy)
-        if per_batch:
-            res.train.pc_loss.extend(batch_train_loss)
-            res.train.accuracy.extend(batch_train_accuracy)
-            res.validation.pc_loss.extend(batch_val_loss)
-            res.validation.accuracy.extend(batch_val_accuracy)
+        if progress is not None:
+            epoch_range = progress(range(n_epochs))
         else:
+            epoch_range = range(n_epochs)
+
+        for epoch in epoch_range:
+            # train
+            batch_train_loss = []
+            batch_train_accuracy = []
+            for i, (x, y) in enumerate(self.train_loader):
+                # train main net
+                self.net.forward_constrained(x, y)
+                pc_loss = self.net.pc_loss()
+
+                self.net.calculate_weight_grad()
+                optimizer.step()
+
+                # train classifier, if we have one
+                y_pred = self.net.forward(x)
+                if self.classifier is not None:
+                    classifier_optim.zero_grad()
+
+                    y_pred = self.classifier(self.net.z[self.classifier_dim])
+                    classifier_loss = self.classifier_criterion(y_pred, y)
+                    classifier_loss.backward()
+                    classifier_optim.step()
+
+                batch_train_loss.append(pc_loss.item())
+                batch_train_accuracy.append(self.accuracy_fct(y_pred, y))
+
+            # evaluate performance on validation set
+            batch_val_loss, batch_val_accuracy = evaluate(
+                self.net,
+                self.validation_loader,
+                accuracy_fct=self.accuracy_fct,
+                classifier=self.classifier,
+                classifier_dim=self.classifier_dim,
+            )
+
+            # store loss and accuracy values
+            epoch_train_loss = np.mean(batch_train_loss)
+            epoch_train_accuracy = np.mean(batch_train_accuracy)
+            epoch_val_loss = np.mean(batch_val_loss)
+            epoch_val_accuracy = np.mean(batch_val_accuracy)
+            # if per_batch:
+            #     res.train.pc_loss.extend(batch_train_loss)
+            #     res.train.accuracy.extend(batch_train_accuracy)
+            #     res.validation.pc_loss.extend(batch_val_loss)
+            #     res.validation.accuracy.extend(batch_val_accuracy)
+            # else:
             res.train.pc_loss.append(epoch_train_loss)
             res.train.accuracy.append(epoch_train_accuracy)
             res.validation.pc_loss.append(epoch_val_loss)
             res.validation.accuracy.append(epoch_val_accuracy)
 
-        # report results, if desired
-        if reporter is not None:
-            reporter(
-                SimpleNamespace(
-                    epoch=epoch,
-                    epoch_train_loss=epoch_train_loss,
-                    epoch_train_accuracy=epoch_train_accuracy,
-                    epoch_val_loss=epoch_val_loss,
-                    epoch_val_accuracy=epoch_val_accuracy,
+            # call any epoch observers
+            epoch_ns = SimpleNamespace(
+                epoch=epoch,
+                epoch_train_loss=epoch_train_loss,
+                epoch_train_accuracy=epoch_train_accuracy,
+                epoch_val_loss=epoch_val_loss,
+                epoch_val_accuracy=epoch_val_accuracy,
+            )
+            for observer, condition in self.epoch_observers:
+                if condition(epoch):
+                    observer(epoch_ns)
+
+            # update progress bar, if any
+            if progress is not None:
+                epoch_range.set_postfix(
+                    {
+                        "val_loss": f"{epoch_val_loss:.2g}",
+                        "val_acc": f"{epoch_val_accuracy:.2f}",
+                    }
                 )
-            )
 
-        # update progress bar, if any
-        if progress is not None:
-            epoch_range.set_postfix(
-                {
-                    "val_loss": f"{epoch_val_loss:.2g}",
-                    "val_acc": f"{epoch_val_accuracy:.2f}",
-                }
-            )
+        # convert to Numpy
+        for ns in [res.train, res.validation]:
+            ns.pc_loss = np.asarray(ns.pc_loss)
+            ns.accuracy = np.asarray(ns.accuracy)
 
-    # convert to Numpy
-    for ns in [res.train, res.validation]:
-        ns.pc_loss = np.asarray(ns.pc_loss)
-        ns.accuracy = np.asarray(ns.accuracy)
+        return res
 
-    return res
+    def __str__(self) -> str:
+        s = f"Trainer(net={str(self.net)}, optimizer_class={str(self.optimizer_class)})"
+        return s
+
+    def __repr__(self) -> str:
+        s = (
+            f"Trainer("
+            f"net={repr(self.net)}, "
+            f"optimizer_class={repr(self.optimizer_class)}, "
+            f"classifier={repr(self.classifier)}, "
+            f"classifier_dim={self.classifier_dim}, "
+            f"classifier_criterion={repr(self.classifier_criterion)}, "
+            f"accuracy_fct={repr(self.accuracy_fct)}, "
+            f")"
+        )
+        return s
+
+    def set_classifier(
+        self, classifier: Union[Callable, None], classifier_dim: Optional[int] = None
+    ) -> "Trainer":
+        """Set a classifier to use for predictions.
+
+        This can be a trainable neural network used to predict the output samples from
+        the `classifier_dim`th layer of `net` after a call to `net.forward()`.
+        
+        It can also be the string "linear", in which case a linear layer of appropriate
+        input and ouptut dimensions is used.
+        
+        You can also set it to `None`, in which case the output from `net.forward()` is
+        used.
+        
+        :param classifier: the classifier to use
+        :param classifier_dim: which layer of `net` to pass into the classifier
+        """
+        self.classifier = classifier
+        if isinstance(self.classifier, str):
+            if self.classifier == "linear":
+                if hasattr(self.net, "dims"):
+                    dims = self.net.dims
+                else:
+                    dims = self.net.pyr_dims
+                self.classifier = torch.nn.Sequential(
+                    torch.nn.Linear(dims[self.classifier_dim], dims[-1])
+                )
+            else:
+                raise ValueError("Invalid classifier type")
+
+        if classifier_dim is not None:
+            self.classifier_dim = classifier_dim
+
+        return self
+
+    def set_classifier_dim(self, classifier_dim: int) -> "Trainer":
+        """Set the layer on which the classifier should act."""
+        self.classifier_dim = classifier_dim
+        return self
+
+    def set_optimizer(self, optimizer: torch.optim.Optimizer, **kwargs) -> "Trainer":
+        """Set the optimizer to be used for training.
+        
+        More specifically, this sets a callable which creates the optimizer (typically a
+        class, like `torch.optim.Adam`). Additional arguments are stored, to be passed
+        to `optimizer()` at `run` time.
+
+        :param optimizer: the callable that generates the optimizer
+        :param **kwargs: additional arguments to pass to the `optimizer()` call
+        """
+        self.optimizer_class = optimizer
+        self.optimizer_kwargs = kwargs
+        return self
+
+    def add_epoch_observer(
+        self, observer: Callable, condition: Optional[Callable] = None
+    ) -> "Trainer":
+        """Set an epoch-dependent observer.
+        
+        An observer is a function called after every training epoch, or after every
+        epoch satisfying a certain condition. The observer gets called with a namespace
+        argument,
+            observer(ns: SimpleNamespace)
+        where the `SimpleNamespace` contains
+            epoch:          the index of the epoch that just ended
+            train_loss:     (predictive-coding) loss on training set
+            val_loss:       (predictive-coding) loss on validation set
+            train_accuracy: accuracy on training set
+            val_accuracy:   accuracy on validation set
+        
+        :param observer: the observer callback
+        :param condition: condition to be fulfilled for the observer to be called; this
+            has signature (epoch: int) -> bool; must return true to call observer
+        """
+        if condition is None:
+            condition = lambda _: True
+        self.epoch_observers.append((observer, condition))
+        return self
 
 
 def load_mnist(

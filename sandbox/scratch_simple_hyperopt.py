@@ -9,7 +9,7 @@ import pydove as dv
 from tqdm.notebook import tqdm
 
 import torch
-from cpcn import LinearCPCNetwork, load_mnist, train
+from cpcn import LinearCPCNetwork, load_mnist, Trainer
 
 import optuna
 from optuna.trial import TrialState
@@ -54,20 +54,13 @@ def objective(
     net = create_cpcn(trial).to(device)
 
     optimizer_type = trial.suggest_categorical("optimizer", ["Adam", "RMSprop", "SGD"])
+    optimizer_class = getattr(torch.optim, optimizer_type)
     lr = trial.suggest_float("lr", 1e-5, 1e-1, log=True)
 
-    optimizer_class = getattr(torch.optim, optimizer_type)
-    optimizer_kws = {"lr": lr}
-
-    results = train(
-        net,
-        n_epochs,
-        dataset["train"],
-        dataset["validation"],
-        optimizer=optimizer_class,
-        optimizer_kwargs=optimizer_kws,
-        reporter=lambda ns: optuna_reporter(trial, ns),
-    )
+    trainer = Trainer(net, dataset["train"], dataset["validation"])
+    trainer.set_optimizer(optimizer_class, lr=lr)
+    trainer.add_epoch_observer(lambda ns: optuna_reporter(trial, ns))
+    results = trainer.run(n_epochs)
 
     return results.validation.pc_loss[-1]
 
