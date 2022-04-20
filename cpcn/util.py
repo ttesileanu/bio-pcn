@@ -92,6 +92,8 @@ class Trainer:
     :param classifier_dim: which layer of `net` to pass into the classifier
     :param epoch_observers: list of tuples `(observer, condition)`; see
         `add_epoch_observer()`
+    :param batch_observers: list of tuples `(observer, condition, profile)`; see
+        `add_batch_observer()`
     """
 
     def __init__(self, net, train_loader: Iterable, validation_loader: Iterable):
@@ -117,6 +119,7 @@ class Trainer:
         self.classifier_dim = -2
 
         self.epoch_observers = []
+        self.batch_observers = []
 
     def run(
         self, n_epochs: int, progress: Optional[Callable] = None
@@ -156,8 +159,19 @@ class Trainer:
             batch_train_loss = []
             batch_train_accuracy = []
             for i, (x, y) in enumerate(self.train_loader):
+                # check for any observers -- need to know whether to request profiles
+                observers = []
+                need_profile = False
+                for observer, condition, profile in self.batch_observers:
+                    if condition(epoch, i):
+                        observers.append(observer)
+                        if profile:
+                            need_profile = True
+
                 # train main net
-                self.net.forward_constrained(x, y)
+                batch_results = self.net.forward_constrained(
+                    x, y, pc_loss_profile=need_profile, latent_profile=need_profile
+                )
                 pc_loss = self.net.pc_loss()
 
                 self.net.calculate_weight_grad()
@@ -173,8 +187,23 @@ class Trainer:
                     classifier_loss.backward()
                     classifier_optim.step()
 
+                accuracy = self.accuracy_fct(y_pred, y)
                 batch_train_loss.append(pc_loss.item())
-                batch_train_accuracy.append(self.accuracy_fct(y_pred, y))
+                batch_train_accuracy.append(accuracy)
+
+                if len(observers) > 0:
+                    batch_ns = SimpleNamespace(
+                        epoch=epoch,
+                        batch=i,
+                        net=self.net,
+                        train_loss=pc_loss,
+                        train_accuracy=accuracy,
+                    )
+                    if need_profile:
+                        batch_ns.pc_loss_profile = batch_results.pc_loss
+                        batch_ns.latent_profile = batch_results.latent
+                    for observer in observers:
+                        observer(batch_ns)
 
             # evaluate performance on validation set
             batch_val_loss, batch_val_accuracy = evaluate(
@@ -190,12 +219,6 @@ class Trainer:
             epoch_train_accuracy = np.mean(batch_train_accuracy)
             epoch_val_loss = np.mean(batch_val_loss)
             epoch_val_accuracy = np.mean(batch_val_accuracy)
-            # if per_batch:
-            #     res.train.pc_loss.extend(batch_train_loss)
-            #     res.train.accuracy.extend(batch_train_accuracy)
-            #     res.validation.pc_loss.extend(batch_val_loss)
-            #     res.validation.accuracy.extend(batch_val_accuracy)
-            # else:
             res.train.pc_loss.append(epoch_train_loss)
             res.train.accuracy.append(epoch_train_accuracy)
             res.validation.pc_loss.append(epoch_val_loss)
@@ -205,10 +228,16 @@ class Trainer:
             epoch_ns = SimpleNamespace(
                 epoch=epoch,
                 net=self.net,
-                epoch_train_loss=epoch_train_loss,
-                epoch_train_accuracy=epoch_train_accuracy,
-                epoch_val_loss=epoch_val_loss,
-                epoch_val_accuracy=epoch_val_accuracy,
+                train_loss=epoch_train_loss,
+                train_accuracy=epoch_train_accuracy,
+                val_loss=epoch_val_loss,
+                val_accuracy=epoch_val_accuracy,
+                batch_profile=SimpleNamespace(
+                    train_loss=batch_train_loss,
+                    train_accuracy=batch_train_accuracy,
+                    val_loss=batch_val_loss,
+                    val_accuracy=batch_val_accuracy,
+                ),
             )
             for observer, condition in self.epoch_observers:
                 if condition(epoch):
@@ -325,6 +354,43 @@ class Trainer:
         if condition is None:
             condition = lambda _: True
         self.epoch_observers.append((observer, condition))
+        return self
+
+    def add_batch_observer(
+        self,
+        observer: Callable,
+        condition: Optional[Callable] = None,
+        profile: bool = False,
+    ) -> "Trainer":
+        """Set a batch-dependent observer.
+        
+        An observer is a function called after every batch of every training epoch -- or
+        after those satisfying a certain condition. The observer gets called with a
+        namespace argument,
+            observer(ns: SimpleNamespace)
+        where the `SimpleNamespace` contains
+            epoch:          the index of the epoch that just ended
+            batch:          the index of the batch that was just processed
+            net:            the network that is being optimized
+            train_loss:     (predictive-coding) loss on training set
+            train_accuracy: accuracy on training set
+
+            (if `profile == True`)
+            pc_loss_profile:the loss profile from `net.forward_constrained()`
+            latent_profile: the latent profile from `net.forward_constrained()`
+        
+        Note that setting `profile` to true could potentially slow down learning.
+        
+        :param observer: the observer callback
+        :param condition: condition to be fulfilled for the observer to be called; this
+            has signature (epoch: int, batch: int) -> bool; must return true to call
+            observer
+        :param profile: whether to request the loss and latent profile from
+            `net.forward_constrained()`
+        """
+        if condition is None:
+            condition = lambda epoch, batch: True
+        self.batch_observers.append((observer, condition, profile))
         return self
 
 
