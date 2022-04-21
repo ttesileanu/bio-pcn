@@ -450,9 +450,9 @@ class Trainer:
             if len(parts) > 0:
                 # this is part of a multi-layer variable
                 k = int(parts[-1])
-                target.append(value[k].clone().detach().unsqueeze(0))
+                target.append(value[k].detach().clone().unsqueeze(0))
             else:
-                target.append(value.clone().detach().unsqueeze(0))
+                target.append(value.detach().clone().unsqueeze(0))
 
     def _sample_monitor(self, name: str, ns: SimpleNamespace):
         """Observer called to update per-sample monitors."""
@@ -470,7 +470,7 @@ class Trainer:
             # handle batch size of 1
             if value.ndim == 1:
                 value = value.unsqueeze(0)
-            value = value.clone().detach()
+            value = value.detach().clone()
             target.append(value)
 
         batch_size = len(value)
