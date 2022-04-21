@@ -19,6 +19,7 @@ class PCNetwork(object):
         it_inference: int = 100,
         lr_inference: float = 0.2,
         variances: Union[Sequence, float] = 1.0,
+        bias: bool = True,
     ):
         """ Initialize the network.
 
@@ -27,6 +28,7 @@ class PCNetwork(object):
         :param it_inference: number of iterations per inference step
         :param lr_inference: learning rate for inference step
         :param variances: variance(s) to use for each layer after the first
+        :param bias: whether to include a bias term
         """
         self.training = True
 
@@ -46,6 +48,7 @@ class PCNetwork(object):
             if np.size(variances) > 1
             else np.repeat(variances, len(self.dims) - 1)
         )
+        self.bias = bias
 
         assert len(self.variances) == len(self.dims) - 1
 
@@ -55,10 +58,13 @@ class PCNetwork(object):
             torch.Tensor(self.dims[i + 1], self.dims[i])
             for i in range(len(self.dims) - 1)
         ]
-        self.b = [
-            torch.zeros(self.dims[i + 1], requires_grad=True)
-            for i in range(len(self.dims) - 1)
-        ]
+        if self.bias:
+            self.b = [
+                torch.zeros(self.dims[i + 1], requires_grad=True)
+                for i in range(len(self.dims) - 1)
+            ]
+        else:
+            self.b = []
         for W in self.W:
             nn.init.xavier_uniform_(W)
             W.requires_grad = True
@@ -87,7 +93,11 @@ class PCNetwork(object):
         z[0] = x
         for i in range(len(self.dims) - 1):
             x = self.activation[i](x)
-            x = x @ self.W[i].T + self.b[i]
+
+            if self.bias:
+                x = x @ self.W[i].T + self.b[i]
+            else:
+                x = x @ self.W[i].T
 
             z[i + 1] = x
 
@@ -141,9 +151,13 @@ class PCNetwork(object):
 
         # ensure we're not calculating unneeded gradients
         # this improves speed by about 15% in the Whittington&Bogacz XOR example
-        for W, b in zip(self.W, self.b):
-            W.requires_grad = False
-            b.requires_grad = False
+        if self.bias:
+            for W, b in zip(self.W, self.b):
+                W.requires_grad = False
+                b.requires_grad = False
+        else:
+            for W in self.W:
+                W.requires_grad = False
 
         if latent_profile:
             batch_size = x.shape[0] if x.ndim > 1 else 1
@@ -170,9 +184,13 @@ class PCNetwork(object):
                     latent[k][i, :, :] = crt_z
 
         # reset requires_grad
-        for W, b in zip(self.W, self.b):
-            W.requires_grad = True
-            b.requires_grad = True
+        if self.bias:
+            for W, b in zip(self.W, self.b):
+                W.requires_grad = True
+                b.requires_grad = True
+        else:
+            for W in self.W:
+                W.requires_grad = True
 
         ns = SimpleNamespace()
         if pc_loss_profile:
@@ -188,7 +206,10 @@ class PCNetwork(object):
         x = self.z[0]
         for i in range(len(self.dims) - 1):
             x_pred = self.activation[i](x)
-            x_pred = x_pred @ self.W[i].T + self.b[i]
+            if self.bias:
+                x_pred = x_pred @ self.W[i].T + self.b[i]
+            else:
+                x_pred = x_pred @ self.W[i].T
 
             x = self.z[i + 1]
             # noinspection PyUnresolvedReferences
@@ -228,7 +249,8 @@ class PCNetwork(object):
         with torch.no_grad():
             for i in range(len(self.W)):
                 self.W[i] = self.W[i].to(*args, **kwargs).requires_grad_()
-                self.b[i] = self.b[i].to(*args, **kwargs).requires_grad_()
+                if self.bias:
+                    self.b[i] = self.b[i].to(*args, **kwargs).requires_grad_()
 
             for i in range(len(self.z)):
                 self.z[i] = self.z[i].to(*args, **kwargs)
@@ -240,7 +262,10 @@ class PCNetwork(object):
 
         These are the weights and biases.
         """
-        return self.W + self.b
+        if self.bias:
+            return self.W + self.b
+        else:
+            return self.W
 
     def fast_parameters(self) -> list:
         """ Create list of parameters to optimize in the fast phase.
@@ -250,7 +275,13 @@ class PCNetwork(object):
         return self.z[1:-1]
 
     def __str__(self) -> str:
-        s = f"PCNetwork(dims={str(self.dims)}, activation={str(self.activation)})"
+        s = (
+            f"PCNetwork("
+            f"dims={str(self.dims)}, "
+            f"activation={str(self.activation)}, "
+            f"bias={str(self.bias)}"
+            f")"
+        )
         return s
 
     def __repr__(self) -> str:
@@ -258,6 +289,7 @@ class PCNetwork(object):
             f"PCNetwork("
             f"dims={repr(self.dims)}, "
             f"activation={repr(self.activation)}, "
+            f"bias={str(self.bias)}, "
             f"it_inference={self.it_inference}, "
             f"lr_inference={self.lr_inference}, "
             f"variances={self.variances}"

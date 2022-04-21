@@ -11,6 +11,12 @@ def net():
     return net
 
 
+@pytest.fixture
+def net_nb():
+    net = PCNetwork([3, 4, 2], bias=False)
+    return net
+
+
 def test_number_of_layers(net):
     assert len(net.W) == 2
     assert len(net.b) == 2
@@ -597,3 +603,21 @@ def test_forward_always_returns_all_layers_of_z(net):
 
     for x, y in zip(z, net.z):
         assert torch.allclose(x, y)
+
+
+def test_forward_result_is_stationary_point_of_forward_constrained_nobias(net_nb):
+    x0 = torch.FloatTensor([0.5, -0.7, 0.2])
+    net_nb.forward(x0)
+
+    old_z = [_.clone().detach() for _ in net_nb.z]
+    net_nb.forward_constrained(old_z[0], old_z[-1])
+
+    for old, new in zip(old_z, net_nb.z):
+        assert torch.allclose(old, new)
+
+
+def test_forward_maps_zero_to_zero_when_nobias(net_nb):
+    x0 = torch.FloatTensor([0.0, 0.0, 0.0])
+    net_nb.forward(x0)
+
+    assert torch.max(torch.abs(net_nb.z[-1])) < 1e-5
