@@ -121,15 +121,17 @@ class Trainer:
                 self.net.calculate_weight_grad()
                 optimizer.step()
 
-                # train classifier, if we have one
-                y_pred = self.net.forward(x)
+                # train classifier, if we have one; but don't overwrite latents!
+                z_fwd = self.net.forward(x, inplace=False)
                 if self.classifier is not None:
-                    classifier_optim.zero_grad()
+                    y_pred = self.classifier(z_fwd[self.classifier_dim])
 
-                    y_pred = self.classifier(self.net.z[self.classifier_dim])
+                    classifier_optim.zero_grad()
                     classifier_loss = self.classifier_criterion(y_pred, y)
                     classifier_loss.backward()
                     classifier_optim.step()
+                else:
+                    y_pred = z_fwd[-1]
 
                 accuracy = self.accuracy_fct(y_pred, y)
                 batch_train_loss.append(pc_loss.item())
