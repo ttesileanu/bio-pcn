@@ -102,14 +102,19 @@ class LinearCPCNetwork:
         self.n = [torch.zeros(dim) for dim in self.inter_dims]
         self.z = [torch.zeros(dim) for dim in self.pyr_dims]
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, inplace: bool = True) -> torch.Tensor:
         """Do a forward pass with unconstrained output.
 
         This uses the basal weights and biases to propagate the input through the net
         up to the last hidden layer, then the apical weights to generate the output.
 
         :param x: input sample
-        :return: activation at the output layer
+        :param inplace: whether to update the latent-state values in-place; if false,
+            the values are returned instead of the last-layer activation
+        :returns: list of layer activations after the forward pass; if `inplace` is
+            true (the default), this is the same as `self.z`; if `inplace` is false, the
+            returned activations will be the same as if `inplace` were true, but
+            `self.z` will be untouched
         """
         z = [x]
         n = len(self.pyr_dims)
@@ -126,8 +131,10 @@ class LinearCPCNetwork:
         x = x @ W.T + h
         z.append(x)
 
-        self.z = z
-        return x
+        if inplace:
+            self.z = z
+
+        return z
 
     def forward_constrained(
         self,

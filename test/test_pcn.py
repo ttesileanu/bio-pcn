@@ -162,9 +162,11 @@ def test_no_nan_or_inf_after_a_few_learning_steps(net):
 
 
 def test_forward_output_depends_on_input(net):
-    y1 = net.forward(torch.FloatTensor([0.1, 0.3, -0.2]))
-    y2 = net.forward(torch.FloatTensor([-0.5, 0.1, 0.2]))
-    assert not torch.allclose(y1, y2)
+    y1 = [_.detach().clone() for _ in net.forward(torch.FloatTensor([0.1, 0.3, -0.2]))]
+    y2 = [_.detach().clone() for _ in net.forward(torch.FloatTensor([-0.5, 0.1, 0.2]))]
+
+    for a, b in zip(y1, y2):
+        assert not torch.allclose(a, b)
 
 
 def test_forward_sets_first_element_of_z_to_input_sample(net):
@@ -338,7 +340,8 @@ def test_training_with_batches_of_size_one():
     test_x = torch.FloatTensor([0.5, 0.2])
     out_batch = net.forward(test_x)
 
-    assert torch.allclose(out, out_batch)
+    for crt_out, crt_out_batch in zip(out, out_batch):
+        assert torch.allclose(crt_out, crt_out_batch)
 
 
 def test_training_with_batches_of_nontrivial_size():
@@ -387,7 +390,8 @@ def test_training_with_batches_of_nontrivial_size():
     test_x = torch.FloatTensor([0.5, -0.2])
     out_batch = net.forward(test_x)
 
-    assert torch.allclose(out, out_batch)
+    for crt_out, crt_out_batch in zip(out, out_batch):
+        assert torch.allclose(crt_out, crt_out_batch)
 
 
 def test_forward_constrained_returns_empty_namespace_by_default(net):
@@ -543,3 +547,53 @@ def test_calculate_weight_grad_matches_backward_on_loss(net):
 
     for old, new_param in zip(old_grad, net.slow_parameters()):
         assert torch.allclose(old, new_param.grad)
+
+
+def test_forward_not_inplace_does_not_change_z(net):
+    net.forward_constrained(
+        torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4])
+    )
+    old_z = [_.detach().clone() for _ in net.z]
+
+    net.forward(torch.FloatTensor([0.1, 0.2, 0.3]), inplace=False)
+    for old, new in zip(old_z, net.z):
+        assert torch.allclose(old, new)
+
+
+def test_forward_not_inplace_return_matches_in_place_values(net):
+    x = torch.FloatTensor([0.1, 0.2, 0.3])
+    net.forward(x)
+    inplace_z = [_.detach().clone() for _ in net.z]
+
+    # scramble the z's
+    net.forward_constrained(
+        torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4])
+    )
+
+    # check what happens without inplace
+    new_z = net.forward(x, inplace=False)
+    for old, new in zip(inplace_z, new_z):
+        assert torch.allclose(old, new)
+
+
+def test_forward_not_inplace_return_matches_in_place_values_batch(net):
+    x = torch.FloatTensor([[0.1, 0.2, -0.3], [-0.5, 0.3, 0.2]])
+    net.forward(x)
+    inplace_z = [_.detach().clone() for _ in net.z]
+
+    # scramble the z's
+    net.forward_constrained(
+        torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4])
+    )
+
+    # check what happens without inplace
+    new_z = net.forward(x, inplace=False)
+    for old, new in zip(inplace_z, new_z):
+        assert torch.allclose(old, new)
+
+
+def test_forward_always_returns_all_layers_of_z(net):
+    z = net.forward(torch.FloatTensor([0.1, 0.2, 0.3]))
+
+    for x, y in zip(z, net.z):
+        assert torch.allclose(x, y)

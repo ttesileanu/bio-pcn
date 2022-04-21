@@ -65,23 +65,33 @@ class PCNetwork(object):
 
         self.z = [torch.zeros(dim) for dim in self.dims]
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, inplace: bool = True) -> torch.Tensor:
         """ Do a forward pass with unconstrained output.
 
         This sets each layer's variables to the most likely values given the previous
         layer values. This ends up being the same as a vanilla artificial neural net.
 
         :param x: input sample
-        :returns: activation at output (last) layer
+        :param inplace: whether to update the latent-state values in-place; if false,
+            the values are returned instead of the last-layer activation
+        :returns: list of layer activations after the forward pass; if `inplace` is
+            true (the default), this is the same as `self.z`; if `inplace` is false, the
+            returned activations will be the same as if `inplace` were true, but
+            `self.z` will be untouched
         """
-        self.z[0] = x
+        if inplace:
+            z = self.z
+        else:
+            z = [None for _ in self.z]
+
+        z[0] = x
         for i in range(len(self.dims) - 1):
             x = self.activation[i](x)
             x = x @ self.W[i].T + self.b[i]
 
-            self.z[i + 1] = x
+            z[i + 1] = x
 
-        return x
+        return z
 
     def forward_constrained(
         self,
