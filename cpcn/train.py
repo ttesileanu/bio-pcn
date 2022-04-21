@@ -450,9 +450,9 @@ class Trainer:
             if len(parts) > 0:
                 # this is part of a multi-layer variable
                 k = int(parts[-1])
-                target.append(value[k].clone().detach())
+                target.append(value[k].clone().detach().unsqueeze(0))
             else:
-                target.append(value.clone().detach())
+                target.append(value.clone().detach().unsqueeze(0))
 
     def _sample_monitor(self, name: str, ns: SimpleNamespace):
         """Observer called to update per-sample monitors."""
@@ -469,9 +469,9 @@ class Trainer:
 
             # handle batch size of 1
             if value.ndim == 1:
-                value = [value]
-            value = [_.clone().detach() for _ in value]
-            target.extend(value)
+                value = value.unsqueeze(0)
+            value = value.clone().detach()
+            target.append(value)
 
         batch_size = len(value)
         target_dict["epoch"].extend(batch_size * [ns.epoch])
@@ -510,7 +510,7 @@ class Trainer:
             history = getattr(self.history, name)
             for var in history:
                 if var not in ["epoch", "batch", "sample"]:
-                    history[var] = torch.stack(history[var])
+                    history[var] = torch.cat(history[var])
 
             history["epoch"] = torch.IntTensor(history["epoch"])
             if "batch" in history:
