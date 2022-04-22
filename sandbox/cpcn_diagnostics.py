@@ -2,6 +2,7 @@
 # # Diagnosing CPCN
 
 from types import SimpleNamespace
+from functools import partial
 import pydove as dv
 import matplotlib as mpl
 
@@ -28,11 +29,11 @@ dataset = load_mnist(
 # %% [markdown]
 # ## Train CPCN
 
-n_epochs = 500
+n_epochs = 50
 dims = [784, 5, 10]
 
-z_it = 100
-z_lr = 0.02
+z_it = 50
+z_lr = 0.1
 
 torch.manual_seed(123)
 
@@ -59,6 +60,9 @@ net = net.to(device)
 
 trainer = Trainer(net, dataset["train"], dataset["validation"])
 trainer.set_classifier("linear")
+
+trainer.set_optimizer(torch.optim.Adam, lr=0.001)
+# trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.9))
 
 trainer.peek_epoch("weight", ["W_a", "W_b", "Q", "M"])
 trainer.peek_sample("latent", ["z"])
@@ -135,4 +139,21 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
     ax2.set_xlabel("epoch")
     ax2.set_ylabel("error rate (%)")
 
+# %% [markdown]
+# ## Check weight evolution
+
+D = len(net.inter_dims)
+with dv.FigureManager(2, D, squeeze=False) as (_, axs):
+    for ax_row, w_choice in zip(axs, ["W_a", "W_b"]):
+        for k, ax in enumerate(ax_row):
+            crt_data = trainer.history.weight[f"{w_choice}:{k}"].reshape(n_epochs, -1)
+            n_lines = crt_data.shape[1]
+            alpha = max(min(50 / n_lines, 0.5), 0.01)
+            ax.plot(crt_data, c="k", lw=0.5, alpha=alpha)
+
+            ax.set_xlabel("epoch")
+            ax.set_ylabel(w_choice)
+
+            if w_choice == "W_a":
+                ax.set_title(f"layer {k}")
 # %%
