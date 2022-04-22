@@ -37,6 +37,7 @@ class Trainer:
         `add_batch_observer()`
     :param history: namespace of history data for the last call to `run()`; see the
         `peek...` functions
+    :param schedulers: list of learning-rate scheduler constructors
     """
 
     def __init__(self, net, train_loader: Iterable, validation_loader: Iterable):
@@ -63,6 +64,7 @@ class Trainer:
 
         self.epoch_observers = []
         self.batch_observers = []
+        self.schedulers = []
 
         self.history = SimpleNamespace()
 
@@ -85,6 +87,11 @@ class Trainer:
         optimizer = self.optimizer_class(
             self.net.slow_parameters(), **self.optimizer_kwargs
         )
+
+        # set up any learning-rate schedulers
+        schedulers = []
+        for constructor in self.schedulers:
+            schedulers.append(constructor(optimizer))
 
         if self.classifier is not None:
             if self.classifier_criterion is None:
@@ -190,6 +197,10 @@ class Trainer:
             for observer, condition in self.epoch_observers:
                 if condition(epoch):
                     observer(epoch_ns)
+
+            # run learning-rate schedulers
+            for scheduler in schedulers:
+                scheduler.step()
 
             # update progress bar, if any
             if progress is not None:
@@ -463,6 +474,20 @@ class Trainer:
             condition,
             profile=True,
         )
+
+    def add_scheduler(self, scheduler: Callable) -> "Trainer":
+        """Add a constructor for a learning-rate scheduler.
+        
+        Calling `scheduler()` with the optimizer as an argument should create a
+        learning-rate scheduler. (This is needed since the optimizer is only generated
+        during a call to `run()`.)
+
+        You can use an inline function to pass additional arguments to standard
+        schedulers, e.g.:
+            lambda optimizer: torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.9)
+        """
+        self.schedulers.append(scheduler)
+        return self
 
     def _monitor(self, name: str, ns: SimpleNamespace):
         """Observer called to update per-epoch or per-batch monitors."""
