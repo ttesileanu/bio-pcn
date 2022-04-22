@@ -10,6 +10,7 @@ import numpy as np
 import torch
 
 from tqdm.notebook import tqdm
+from functools import partial
 
 from cpcn import LinearCPCNetwork, PCNetwork, load_mnist, Trainer
 
@@ -33,7 +34,7 @@ dataset = load_mnist(n_train=5000, n_validation=1000, device=device)
 n_epochs = 50
 dims = [784, 5, 10]
 it_inference = 50
-lr_inference = 0.1
+lr_inference = 0.01
 
 torch.manual_seed(123)
 
@@ -49,6 +50,10 @@ net = net.to(device)
 
 trainer = Trainer(net, dataset["train"], dataset["validation"])
 trainer.set_classifier("linear")
+
+trainer.set_optimizer(torch.optim.Adam, lr=0.004)
+trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.988))
+
 results = trainer.run(n_epochs, progress=tqdm)
 
 # %% [markdown]
@@ -85,8 +90,8 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
 # ## Train CPCN
 
 # %%
-z_it = 100
-z_lr = 0.05
+z_it = 50
+z_lr = 0.15
 
 torch.manual_seed(123)
 
@@ -112,6 +117,10 @@ cpcn_net = cpcn_net.to(device)
 
 cpcn_trainer = Trainer(cpcn_net, dataset["train"], dataset["validation"])
 cpcn_trainer.set_classifier("linear")
+
+cpcn_trainer.set_optimizer(torch.optim.SGD, lr=0.01)
+cpcn_trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.997))
+
 cpcn_results = cpcn_trainer.run(n_epochs, progress=tqdm)
 
 # %% [markdown]
