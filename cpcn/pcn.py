@@ -147,7 +147,7 @@ class PCNetwork(object):
             x.requires_grad = True
 
         # create an optimizer for the fast parameters
-        fast_optimizer = torch.optim.SGD(self.fast_parameters(), lr=self.lr_inference)
+        fast_optimizer = torch.optim.Adam(self.fast_parameters(), lr=self.lr_inference)
 
         # ensure we're not calculating unneeded gradients
         # this improves speed by about 15% in the Whittington&Bogacz XOR example

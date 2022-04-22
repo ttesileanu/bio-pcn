@@ -40,7 +40,7 @@ class LinearCPCNetwork:
         :param bias_a: whether to have bias terms at the apical end
         :param bias_b: whether to have bias terms at the basal end
         :param fast_optimizer: constructor for the optimizer used for the fast dynamics
-            in `forward_constrained`; by default this is `SGD`
+            in `forward_constrained`; by default this is `Adam`
         """
         self.training = True
 
@@ -67,7 +67,7 @@ class LinearCPCNetwork:
         if fast_optimizer is not None:
             self.fast_optimizer = fast_optimizer
         else:
-            self.fast_optimizer = torch.optim.SGD
+            self.fast_optimizer = torch.optim.Adam
 
         # create network parameters
         # weights and biases
