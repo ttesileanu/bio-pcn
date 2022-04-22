@@ -601,9 +601,11 @@ def evaluate(
         loss.append(net.pc_loss().item())
 
         # figure out model predictions
-        y_pred = net.forward(x)
+        z_pred = net.forward(x, inplace=False)
         if classifier is not None:
-            y_pred = classifier(net.z[classifier_dim])
+            y_pred = classifier(z_pred[classifier_dim])
+        else:
+            y_pred = z_pred[-1]
 
         accuracy.append(accuracy_fct(y_pred, y))
 
