@@ -1,5 +1,7 @@
 import pytest
 
+from types import SimpleNamespace
+
 from cpcn.linear import LinearCPCNetwork
 from cpcn.pcn import PCNetwork
 
@@ -520,7 +522,7 @@ def test_pc_loss_on_batch(net):
         net.forward_constrained(x[i], y[i])
         loss += net.pc_loss()
 
-    assert batch_loss.item() == pytest.approx(loss.item())
+    assert batch_loss.item() == pytest.approx(loss.item() / len(x))
 
 
 def test_weight_grad_on_batch(net):
@@ -539,7 +541,7 @@ def test_weight_grad_on_batch(net):
             expected_grads[k] += new_W.grad
 
     for old, new in zip(batch_W_grad, expected_grads):
-        assert torch.allclose(old, new)
+        assert torch.allclose(old, new / len(x))
 
 
 def test_bias_grad_on_batch(net):
@@ -558,7 +560,7 @@ def test_bias_grad_on_batch(net):
             expected_grads[k] += new_h.grad
 
     for old, new in zip(batch_h_grad, expected_grads):
-        assert torch.allclose(old, new)
+        assert torch.allclose(old, new / len(x))
 
 
 def test_weights_change_when_optimizing_slow_parameters(net):
@@ -612,39 +614,91 @@ def test_no_nan_or_inf_after_a_few_learning_steps(net):
         assert torch.all(torch.isfinite(z))
 
 
-def linear_cpcn_loss(net: LinearCPCNetwork) -> torch.Tensor:
+def linear_cpcn_loss(net: LinearCPCNetwork, reduction: str = "sum") -> torch.Tensor:
     D = len(net.inter_dims)
-    loss = torch.FloatTensor([0])
+    batch_size = 1 if net.z[0].ndim == 1 else len(net.z[0])
+    loss = torch.zeros(batch_size)
+    batch_outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
     for i in range(D):
         z = net.z[i + 1]
 
         mu = net.z[i] @ net.W_b[i].T + net.h_b[i]
         error = z - mu
-        basal = 0.5 * net.g_b[i] * torch.sum(error ** 2)
+        basal = 0.5 * net.g_b[i] * (error ** 2).sum(dim=-1)
 
         diff = net.z[i + 2] - net.h_a[i]
-        cross_term = torch.dot(diff, z @ net.W_a[i].T)
+        cross_term = (diff * (z @ net.W_a[i].T)).sum(dim=-1)
         wa_reg = torch.trace(net.W_a[i] @ net.W_a[i].T)
-        apical0 = torch.sum(diff ** 2) - 2 * cross_term + wa_reg
+        apical0 = (diff ** 2).sum(dim=-1) - 2 * cross_term + wa_reg
         apical = 0.5 * net.g_a[i] * apical0
 
         # need to flip this for Q because we're maximizing!!
-        z_cons = torch.outer(z, z) - torch.eye(len(z))
+        z_cons = batch_outer(z, z) - torch.eye(z.shape[-1])
         q_prod = net.Q[i].T @ net.Q[i]
-        constraint0 = torch.trace(q_prod @ z_cons)
+        constraint0 = (q_prod @ z_cons).diagonal(dim1=-1, dim2=-2).sum(dim=-1)
         constraint = -0.5 * net.g_a[i] * constraint0
 
         alpha = net.l_s[i] - net.g_b[i]
-        z_reg = 0.5 * alpha * torch.sum(z ** 2)
+        z_reg = 0.5 * alpha * (z ** 2).sum(dim=-1)
 
-        m_prod = torch.dot(z, net.M[i] @ z)
+        m_prod = (z * (z @ net.M[i].T)).sum(dim=-1)
         m_reg = torch.trace(net.M[i] @ net.M[i].T)
         lateral0 = -2 * m_prod + m_reg
         lateral = 0.5 * net.c_m[i] * lateral0
 
         loss += basal + apical + constraint + z_reg + lateral
 
+    if reduction == "sum":
+        loss = loss.sum()
+    elif reduction == "mean":
+        loss = loss.mean()
+    elif reduction != "none":
+        raise ValueError("unknown reduction type")
+
     return loss
+
+
+@pytest.fixture
+def data() -> tuple:
+    x = torch.FloatTensor([[-0.1, 0.2, 0.4], [0.5, 0.3, 0.2], [-1.0, 2.3, 0.1]])
+    y = torch.FloatTensor([[0.3, -0.4], [0.1, 0.2], [-0.5, 1.2]])
+    return SimpleNamespace(x=x, y=y)
+
+
+def test_cpcn_loss_reduction_none(net, data):
+    net.forward_constrained(data.x, data.y)
+    loss = linear_cpcn_loss(net, reduction="none")
+
+    for i, (crt_x, crt_y) in enumerate(zip(data.x, data.y)):
+        net.forward_constrained(crt_x, crt_y)
+        crt_loss = linear_cpcn_loss(net)
+
+        assert loss[i].item() == pytest.approx(crt_loss.item())
+
+
+def test_cpcn_loss_reduction_sum(net, data):
+    net.forward_constrained(data.x, data.y)
+    loss = linear_cpcn_loss(net, reduction="sum")
+
+    expected = 0
+    for crt_x, crt_y in zip(data.x, data.y):
+        net.forward_constrained(crt_x, crt_y)
+        expected += linear_cpcn_loss(net)
+
+    assert loss.item() == pytest.approx(expected.item())
+
+
+def test_cpcn_loss_reduction_mean(net, data):
+    net.forward_constrained(data.x, data.y)
+    loss = linear_cpcn_loss(net, reduction="mean")
+
+    expected = 0
+    for crt_x, crt_y in zip(data.x, data.y):
+        net.forward_constrained(crt_x, crt_y)
+        expected += linear_cpcn_loss(net)
+
+    expected /= len(data.x)
+    assert loss.item() == pytest.approx(expected.item())
 
 
 @pytest.mark.parametrize("var", ["W_a", "W_b", "h_a", "h_b", "Q", "M"])
@@ -854,3 +908,65 @@ def test_forward_always_returns_all_layers_of_z(net):
 
     for x, y in zip(z, net.z):
         assert torch.allclose(x, y)
+
+
+def test_loss_reduction_none(net, data):
+    net.forward_constrained(data.x, data.y)
+    loss = net.pc_loss(reduction="none")
+
+    for i, (crt_x, crt_y) in enumerate(zip(data.x, data.y)):
+        net.forward_constrained(crt_x, crt_y)
+        crt_loss = net.pc_loss()
+
+        assert loss[i].item() == pytest.approx(crt_loss.item())
+
+
+def test_loss_reduction_sum(net, data):
+    net.forward_constrained(data.x, data.y)
+    loss = net.pc_loss(reduction="sum")
+
+    expected = 0
+    for crt_x, crt_y in zip(data.x, data.y):
+        net.forward_constrained(crt_x, crt_y)
+        expected += net.pc_loss()
+
+    assert loss.item() == pytest.approx(expected.item())
+
+
+def test_loss_reduction_mean(net, data):
+    net.forward_constrained(data.x, data.y)
+    loss = net.pc_loss(reduction="mean")
+
+    expected = 0
+    for crt_x, crt_y in zip(data.x, data.y):
+        net.forward_constrained(crt_x, crt_y)
+        expected += net.pc_loss()
+
+    expected /= len(data.x)
+    assert loss.item() == pytest.approx(expected.item())
+
+
+@pytest.mark.parametrize("var", ["W_a", "W_b", "h_a", "h_b", "Q", "M"])
+@pytest.mark.parametrize("red", ["sum", "mean"])
+def test_weight_gradients_match_autograd_from_loss_batch(net, data, var, red):
+    net.z_it = 1000
+
+    net.forward_constrained(data.x, data.y)
+    net.calculate_weight_grad(reduction=red)
+
+    manual_grads = [_.grad.clone().detach() for _ in getattr(net, var)]
+
+    for param in net.slow_parameters():
+        param.requires_grad_()
+        if param.grad is not None:
+            param.grad.detach_()
+            param.grad.zero_()
+
+    loss = linear_cpcn_loss(net, reduction=red)
+    loss.backward()
+
+    loss_grads = [_.grad.clone().detach() for _ in getattr(net, var)]
+
+    for from_manual, from_loss in zip(manual_grads, loss_grads):
+        assert torch.allclose(from_manual, from_loss, rtol=1e-2, atol=1e-5)
+

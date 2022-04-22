@@ -206,10 +206,16 @@ class PCNetwork(object):
 
         return ns
 
-    def loss(self) -> torch.Tensor:
-        """ Calculate the loss given the current values of the random variables. """
-        loss = torch.FloatTensor([0])
+    def loss(self, reduction: str = "mean") -> torch.Tensor:
+        """ Calculate the loss given the current values of the random variables.
+        
+        :param reduction: reduction to apply to the output: `"none" | "mean" | "sum"`
+        """
         x = self.z[0]
+
+        batch_size = 1 if x.ndim == 1 else len(x)
+        loss = torch.zeros(batch_size)
+
         for i in range(len(self.dims) - 1):
             x_pred = self.activation[i](x)
             if self.bias:
@@ -219,7 +225,14 @@ class PCNetwork(object):
 
             x = self.z[i + 1]
             # noinspection PyUnresolvedReferences
-            loss += torch.sum((x - x_pred) ** 2) / self.variances[i]
+            loss += ((x - x_pred) ** 2).sum(dim=-1) / self.variances[i]
+
+        if reduction == "sum":
+            loss = loss.sum()
+        elif reduction == "mean":
+            loss = loss.mean()
+        elif reduction != "none":
+            raise ValueError("unknown reduction type")
 
         loss *= 0.5
         return loss
@@ -228,18 +241,20 @@ class PCNetwork(object):
         """ An alias of `self.loss()`, for consistency with CPCN classes."""
         return self.loss()
 
-    def calculate_weight_grad(self):
+    def calculate_weight_grad(self, reduction: str = "mean"):
         """Calculate gradients for slow (weight) variables.
 
         This is equivalent to using `backward()` on the output from `self.loss()`
         (after zeroing all the gradients) and is only provided here for consistency with
         constrained predictive-coding networks, where the gradients are calculated
         manually.
+
+        :param reduction: reduction to apply to the gradients: `"mean" | "sum"`
         """
         for param in self.slow_parameters():
             param.grad = None
 
-        loss = self.loss()
+        loss = self.loss(reduction=reduction)
         loss.backward()
 
     def train(self):

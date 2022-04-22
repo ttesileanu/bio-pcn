@@ -221,7 +221,7 @@ class LinearCPCNetwork:
 
         return ns
 
-    def calculate_weight_grad(self):
+    def calculate_weight_grad(self, reduction: str = "mean"):
         """Calculate gradients for slow (weight) variables.
 
         This assumes that the fast variables have been calculated, using
@@ -232,9 +232,12 @@ class LinearCPCNetwork:
         modified loss that can generate both the latent- and weight-gradients in the
         linear case, this is no longer true for non-linear generalizations. We therefore
         use manual gradients in this case, as well, for consistency.
+
+        :param reduction: reduction to apply to the gradients: `"mean" | "sum"`
         """
         D = len(self.pyr_dims) - 2
         batch_outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
+        red_fct = {"mean": torch.mean, "sum": torch.sum}[reduction]
         for i in range(D):
             # apical
             pre = self.z[i + 1]
@@ -245,7 +248,7 @@ class LinearCPCNetwork:
             grad = self.g_a[i] * (self.W_a[i] - batch_outer(post, pre))
             if grad.ndim == self.W_a[i].ndim + 1:
                 # this is a batch evaluation!
-                grad = torch.sum(grad, 0)
+                grad = red_fct(grad, 0)
             self.W_a[i].grad = grad
 
             # basal
@@ -259,7 +262,7 @@ class LinearCPCNetwork:
             grad = batch_outer(post, pre)
             if grad.ndim == self.W_b[i].ndim + 1:
                 # this is a batch evaluation!
-                grad = torch.sum(grad, 0)
+                grad = red_fct(grad, 0)
             self.W_b[i].grad = grad
 
             # inter
@@ -268,7 +271,7 @@ class LinearCPCNetwork:
             grad = self.g_a[i] * (self.Q[i] - batch_outer(post, pre))
             if grad.ndim == self.Q[i].ndim + 1:
                 # this is a batch evaluation!
-                grad = torch.sum(grad, 0)
+                grad = red_fct(grad, 0)
             self.Q[i].grad = grad
 
             # lateral
@@ -277,7 +280,7 @@ class LinearCPCNetwork:
             grad = self.c_m[i] * (self.M[i] - batch_outer(post, pre))
             if grad.ndim == self.M[i].ndim + 1:
                 # this is a batch evaluation!
-                grad = torch.sum(grad, 0)
+                grad = red_fct(grad, 0)
             self.M[i].grad = grad
 
             # biases
@@ -286,14 +289,14 @@ class LinearCPCNetwork:
                 grad = self.g_a[i] * (mu - self.z[i + 2])
                 if grad.ndim == self.h_a[i].ndim + 1:
                     # this is a batch evaluation!
-                    grad = torch.sum(grad, 0)
+                    grad = red_fct(grad, 0)
                 self.h_a[i].grad = grad
             if self.bias_b:
                 mu = self.z[i] @ self.W_b[i].T + self.h_b[i]
                 grad = self.g_b[i] * (mu - self.z[i + 1])
                 if grad.ndim == self.h_b[i].ndim + 1:
                     # this is a batch evaluation!
-                    grad = torch.sum(grad, 0)
+                    grad = red_fct(grad, 0)
                 self.h_b[i].grad = grad
 
     def calculate_z_grad(self):
@@ -342,7 +345,7 @@ class LinearCPCNetwork:
             a_inter = self.n[i] @ self.Q[i]
             self.a[i] = a_feedback - a_inter
 
-    def pc_loss(self) -> torch.Tensor:
+    def pc_loss(self, reduction: str = "mean") -> torch.Tensor:
         """Estimate predictive-coding loss given current activation values.
 
         Note that this loss does *not* generate either the latent-state gradients from
@@ -364,27 +367,35 @@ class LinearCPCNetwork:
 
         This loss is minimized whenever the predictive-coding loss is minimized. (That
         is, at the minimum, `W_a == W_b`.)
+
+        :param reduction: reduction to apply to the output: `"none" | "mean" | "sum"`
         """
-        res = torch.FloatTensor([0])
+        batch_size = 1 if self.z[0].ndim == 1 else len(self.z[0])
+        loss = torch.zeros(batch_size)
 
         D = len(self.pyr_dims) - 2
-        norm = torch.linalg.norm
         for i in range(D):
             mu_a = self.z[i + 1] @ self.W_a[i].T
             if self.bias_a:
                 mu_a += self.h_a[i]
-            apical = self.g_a[i] * norm(self.z[i + 2] - mu_a) ** 2
+            apical = self.g_a[i] * ((self.z[i + 2] - mu_a) ** 2).sum(dim=-1)
 
             mu_b = self.z[i] @ self.W_b[i].T
             if self.bias_b:
                 mu_b += self.h_b[i]
-            basal = self.g_b[i] * norm(self.z[i + 1] - mu_b) ** 2
+            basal = self.g_b[i] * ((self.z[i + 1] - mu_b) ** 2).sum(dim=-1)
 
-            res += apical + basal
+            loss += apical + basal
 
-        res /= 2
+        if reduction == "sum":
+            loss = loss.sum()
+        elif reduction == "mean":
+            loss = loss.mean()
+        elif reduction != "none":
+            raise ValueError("unknown reduction type")
 
-        return res
+        loss /= 2
+        return loss
 
     def fast_parameters(self) -> list:
         """Create list of parameters to optimize in the fast phase.

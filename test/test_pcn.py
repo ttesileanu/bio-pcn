@@ -1,5 +1,7 @@
 import pytest
 
+from types import SimpleNamespace
+
 from cpcn.pcn import PCNetwork
 
 import torch
@@ -370,7 +372,9 @@ def test_training_with_batches_of_nontrivial_size():
     kwargs = {"variances": variances, "it_inference": it_inference}
     net = PCNetwork(dims, **kwargs)
 
-    optimizer = torch.optim.SGD(net.slow_parameters(), lr=lr)
+    # gradients are averaged over batch samples by default, equivalent to lower lr when
+    # training sample by sample
+    optimizer = torch.optim.SGD(net.slow_parameters(), lr=lr / n_samples)
     for crt_x, crt_y in zip(x, y):
         net.forward_constrained(crt_x, crt_y)
 
@@ -398,8 +402,10 @@ def test_training_with_batches_of_nontrivial_size():
     test_x = torch.FloatTensor([0.5, -0.2])
     out_batch = net.forward(test_x)
 
+    # we don't expect these to be super close -- when we make the steps one by one, the
+    # gradients at subsequent batches change due to earlier steps
     for crt_out, crt_out_batch in zip(out, out_batch):
-        assert torch.allclose(crt_out, crt_out_batch)
+        assert torch.allclose(crt_out, crt_out_batch, rtol=0.01, atol=1e-5)
 
 
 def test_forward_constrained_returns_empty_namespace_by_default(net):
@@ -527,11 +533,17 @@ def test_pc_loss_matches_loss(net):
     assert net.loss().item() == pytest.approx(net.pc_loss().item())
 
 
-def test_calculate_weight_grad_matches_backward_on_loss(net):
-    net.forward_constrained(
-        torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4])
-    )
-    net.calculate_weight_grad()
+@pytest.fixture
+def data() -> tuple:
+    x = torch.FloatTensor([[-0.1, 0.2, 0.4], [0.5, 0.3, 0.2], [-1.0, 2.3, 0.1]])
+    y = torch.FloatTensor([[0.3, -0.4], [0.1, 0.2], [-0.5, 1.2]])
+    return SimpleNamespace(x=x, y=y)
+
+
+@pytest.mark.parametrize("red", ["sum", "mean"])
+def test_calculate_weight_grad_matches_backward_on_loss(net, red, data):
+    net.forward_constrained(data.x, data.y)
+    net.calculate_weight_grad(reduction=red)
 
     old_grad = [_.grad.clone().detach() for _ in net.slow_parameters()]
 
@@ -539,7 +551,7 @@ def test_calculate_weight_grad_matches_backward_on_loss(net):
         if param.grad is not None:
             param.grad.zero_()
 
-    loss = net.loss()
+    loss = net.loss(reduction=red)
     loss.backward()
 
     for old, new_param in zip(old_grad, net.slow_parameters()):
@@ -612,3 +624,39 @@ def test_forward_maps_zero_to_zero_when_nobias(net_nb):
     net_nb.forward(x0)
 
     assert torch.max(torch.abs(net_nb.z[-1])) < 1e-5
+
+
+def test_loss_reduction_none(net, data):
+    net.forward_constrained(data.x, data.y)
+    loss = net.loss(reduction="none")
+
+    for i, (crt_x, crt_y) in enumerate(zip(data.x, data.y)):
+        net.forward_constrained(crt_x, crt_y)
+        crt_loss = net.loss()
+
+        assert loss[i].item() == pytest.approx(crt_loss.item())
+
+
+def test_loss_reduction_sum(net, data):
+    net.forward_constrained(data.x, data.y)
+    loss = net.loss(reduction="sum")
+
+    expected = 0
+    for crt_x, crt_y in zip(data.x, data.y):
+        net.forward_constrained(crt_x, crt_y)
+        expected += net.loss()
+
+    assert loss.item() == pytest.approx(expected.item())
+
+
+def test_loss_reduction_mean(net, data):
+    net.forward_constrained(data.x, data.y)
+    loss = net.loss(reduction="mean")
+
+    expected = 0
+    for crt_x, crt_y in zip(data.x, data.y):
+        net.forward_constrained(crt_x, crt_y)
+        expected += net.loss()
+
+    expected /= len(data.x)
+    assert loss.item() == pytest.approx(expected.item())
