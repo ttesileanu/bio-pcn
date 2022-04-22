@@ -20,6 +20,7 @@ class PCNetwork(object):
         lr_inference: float = 0.2,
         variances: Union[Sequence, float] = 1.0,
         bias: bool = True,
+        fast_optimizer: Callable = torch.optim.Adam,
     ):
         """ Initialize the network.
 
@@ -29,6 +30,8 @@ class PCNetwork(object):
         :param lr_inference: learning rate for inference step
         :param variances: variance(s) to use for each layer after the first
         :param bias: whether to include a bias term
+        :param fast_optimizer: constructor for the optimizer used for the fast dynamics
+            in `forward_constrained`
         """
         self.training = True
 
@@ -49,6 +52,7 @@ class PCNetwork(object):
             else np.repeat(variances, len(self.dims) - 1)
         )
         self.bias = bias
+        self.fast_optimizer = fast_optimizer
 
         assert len(self.variances) == len(self.dims) - 1
 
@@ -147,7 +151,9 @@ class PCNetwork(object):
             x.requires_grad = True
 
         # create an optimizer for the fast parameters
-        fast_optimizer = torch.optim.Adam(self.fast_parameters(), lr=self.lr_inference)
+        fast_optimizer = self.fast_optimizer(
+            self.fast_parameters(), lr=self.lr_inference
+        )
 
         # ensure we're not calculating unneeded gradients
         # this improves speed by about 15% in the Whittington&Bogacz XOR example
