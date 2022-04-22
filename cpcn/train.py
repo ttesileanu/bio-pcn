@@ -35,6 +35,8 @@ class Trainer:
         `add_epoch_observer()`
     :param batch_observers: list of tuples `(observer, condition, profile)`; see
         `add_batch_observer()`
+    :param history: namespace of history data for the last call to `run()`; see the
+        `peek...` functions
     """
 
     def __init__(self, net, train_loader: Iterable, validation_loader: Iterable):
