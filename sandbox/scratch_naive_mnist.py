@@ -31,7 +31,7 @@ dataset = load_mnist(n_train=5000, n_validation=1000, device=device)
 
 # %%
 n_epochs = 50
-dims = [784, 50, 20, 10]
+dims = [784, 5, 10]
 it_inference = 50
 lr_inference = 0.1
 
