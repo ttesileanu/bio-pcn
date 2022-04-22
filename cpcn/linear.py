@@ -24,7 +24,7 @@ class LinearCPCNetwork:
         c_m: Union[Sequence, float] = 1.0,
         bias_a: bool = True,
         bias_b: bool = True,
-        fast_optimizer: Optional[Callable] = None,
+        fast_optimizer: Callable = torch.optim.Adam,
     ):
         """Initialize the network.
 
@@ -40,7 +40,7 @@ class LinearCPCNetwork:
         :param bias_a: whether to have bias terms at the apical end
         :param bias_b: whether to have bias terms at the basal end
         :param fast_optimizer: constructor for the optimizer used for the fast dynamics
-            in `forward_constrained`; by default this is `Adam`
+            in `forward_constrained`
         """
         self.training = True
 
@@ -64,10 +64,7 @@ class LinearCPCNetwork:
         self.bias_a = bias_a
         self.bias_b = bias_b
 
-        if fast_optimizer is not None:
-            self.fast_optimizer = fast_optimizer
-        else:
-            self.fast_optimizer = torch.optim.Adam
+        self.fast_optimizer = fast_optimizer
 
         # create network parameters
         # weights and biases
