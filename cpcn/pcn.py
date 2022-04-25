@@ -19,6 +19,8 @@ class PCNetwork(object):
         it_inference: int = 100,
         lr_inference: float = 0.2,
         variances: Union[Sequence, float] = 1.0,
+        whitening: bool = False,
+        rho: Union[Sequence, float] = 0.0,
         bias: bool = True,
         fast_optimizer: Callable = torch.optim.Adam,
     ):
@@ -29,6 +31,9 @@ class PCNetwork(object):
         :param it_inference: number of iterations per inference step
         :param lr_inference: learning rate for inference step
         :param variances: variance(s) to use for each layer after the first
+        :param whitening: if true, use a whitening *in*equality,
+            cov_matrix(z) <= rho * identity_matrix
+        :param rho: parameter(s) for the whitening inequality
         :param bias: whether to include a bias term
         :param fast_optimizer: constructor for the optimizer used for the fast dynamics
             in `forward_constrained`
@@ -51,6 +56,10 @@ class PCNetwork(object):
             if np.size(variances) > 1
             else np.repeat(variances, len(self.dims) - 1)
         )
+        self.rho = torch.from_numpy(
+            np.copy(rho) if np.size(rho) > 1 else np.repeat(rho, len(self.dims) - 1)
+        )
+        self.whitening = whitening
         self.bias = bias
         self.fast_optimizer = fast_optimizer
 
@@ -72,6 +81,15 @@ class PCNetwork(object):
         for W in self.W:
             nn.init.xavier_uniform_(W)
             W.requires_grad = True
+
+        if self.whitening:
+            self.Q = [
+                torch.Tensor(self.dims[i + 1], self.dims[i + 1])
+                for i in range(len(self.dims) - 1)
+            ]
+            for Q in self.Q:
+                nn.init.xavier_uniform_(Q)
+                Q.requires_grad = True
 
         self.z = [torch.zeros(dim) for dim in self.dims]
 
@@ -206,10 +224,17 @@ class PCNetwork(object):
 
         return ns
 
-    def loss(self, reduction: str = "mean") -> torch.Tensor:
+    def loss(
+        self, reduction: str = "mean", ignore_whitening: bool = False
+    ) -> torch.Tensor:
         """ Calculate the loss given the current values of the random variables.
         
         :param reduction: reduction to apply to the output: `"none" | "mean" | "sum"`
+        :param ignore_whitening: if true, a whitening term is not included even if
+            `self.whitening` is true; this does nothing if `self.whitening` is false;
+            note also that the constraint term should vanish when the whitening
+            inequality is satisfied, so this parameter should not make a big difference
+            after training has converged
         """
         x = self.z[0]
 
@@ -227,6 +252,15 @@ class PCNetwork(object):
             # noinspection PyUnresolvedReferences
             loss += ((x - x_pred) ** 2).sum(dim=-1) / self.variances[i]
 
+        if self.whitening:
+            batch_outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
+            for i in range(len(self.dims) - 1):
+                z = self.z[i + 1]
+                cons = batch_outer(z, z) - self.rho[i] * torch.eye(z.shape[-1])
+                q_prod = self.Q[i].T @ self.Q[i]
+                constraint0 = (q_prod @ cons).diagonal(dim1=-1, dim2=-2).sum(dim=-1)
+                loss += (-1 / self.variances[i]) * constraint0
+
         if reduction == "sum":
             loss = loss.sum()
         elif reduction == "mean":
@@ -238,8 +272,10 @@ class PCNetwork(object):
         return loss
 
     def pc_loss(self) -> torch.Tensor:
-        """ An alias of `self.loss()`, for consistency with CPCN classes."""
-        return self.loss()
+        """ An alias of `self.loss()` with `ignore_whitening` set to true. This is
+        mostly useful for consistency with CPCN classes.
+        """
+        return self.loss(ignore_whitening=True)
 
     def calculate_weight_grad(self, reduction: str = "mean"):
         """Calculate gradients for slow (weight) variables.
@@ -276,6 +312,10 @@ class PCNetwork(object):
             for i in range(len(self.z)):
                 self.z[i] = self.z[i].to(*args, **kwargs)
 
+            if self.whitening:
+                for i in range(len(self.Q)):
+                    self.Q[i] = self.Q[i].to(*args, **kwargs).requires_grad_()
+
         return self
 
     def slow_parameters(self) -> list:
@@ -283,10 +323,14 @@ class PCNetwork(object):
 
         These are the weights and biases.
         """
+        params = self.W
+
         if self.bias:
-            return self.W + self.b
-        else:
-            return self.W
+            params.extend(self.b)
+        if self.whitening:
+            params.extend(self.Q)
+
+        return params
 
     def fast_parameters(self) -> list:
         """ Create list of parameters to optimize in the fast phase.

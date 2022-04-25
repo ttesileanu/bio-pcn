@@ -660,3 +660,45 @@ def test_loss_reduction_mean(net, data):
 
     expected /= len(data.x)
     assert loss.item() == pytest.approx(expected.item())
+
+
+@pytest.fixture
+def net_whitening():
+    torch.manual_seed(20392)
+    net = PCNetwork([3, 4, 5, 2], whitening=True, rho=[0.2, 1.5, 0.7])
+    return net
+
+
+def test_q_gradient_with_whitening(net_whitening, data):
+    net = net_whitening
+    net.forward_constrained(data.x, data.y)
+    net.calculate_weight_grad()
+
+    outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
+    for i in range(len(net.dims) - 1):
+        n = net.z[i + 1] @ net.Q[i].T
+        expected = (1 / net.variances[i]) * (
+            net.rho[i] * net.Q[i] - outer(n, net.z[i + 1])
+        ).mean(dim=0)
+        assert torch.allclose(net.Q[i].grad, expected, atol=1e-6)
+
+
+@pytest.mark.parametrize("red", ["sum", "mean"])
+def test_calculate_weight_grad_matches_backward_on_loss_whitening(
+    net_whitening, red, data
+):
+    net = net_whitening
+    net.forward_constrained(data.x, data.y)
+    net.calculate_weight_grad(reduction=red)
+
+    old_grad = [_.grad.clone().detach() for _ in net.slow_parameters()]
+
+    for param in net.slow_parameters():
+        if param.grad is not None:
+            param.grad.zero_()
+
+    loss = net.loss(reduction=red)
+    loss.backward()
+
+    for old, new_param in zip(old_grad, net.slow_parameters()):
+        assert torch.allclose(old, new_param.grad)
