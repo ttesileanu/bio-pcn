@@ -970,3 +970,12 @@ def test_weight_gradients_match_autograd_from_loss_batch(net, data, var, red):
     for from_manual, from_loss in zip(manual_grads, loss_grads):
         assert torch.allclose(from_manual, from_loss, rtol=1e-2, atol=1e-5)
 
+
+def test_train(net):
+    net.train()
+    assert net.training
+
+
+def test_eval(net):
+    net.eval()
+    assert not net.training

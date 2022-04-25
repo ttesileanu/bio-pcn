@@ -440,6 +440,14 @@ class LinearCPCNetwork:
 
         return self
 
+    def train(self):
+        """ Set in training mode. """
+        self.training = True
+
+    def eval(self):
+        """ Set in evaluation mode. """
+        self.training = False
+
     def _initialize_interlayer_weights(self):
         for lst in [self.W_a, self.W_b]:
             for W in lst:
