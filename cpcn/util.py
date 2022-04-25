@@ -25,7 +25,7 @@ def one_hot_accuracy(y_pred, y) -> float:
     """
     n = len(y)
     idx_pred = y_pred.argmax(dim=1)
-    n_correct = y[range(n), idx_pred].sum()
+    n_correct = y[range(n), idx_pred].sum().item()
 
     return n_correct / n
 
