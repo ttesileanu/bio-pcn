@@ -67,7 +67,7 @@ def objective(
 
         # trainer.add_epoch_observer(lambda ns: optuna_reporter(trial, ns))
         results = trainer.run(n_epochs)
-        scores[i] = results.validation.pc_loss[-1]
+        scores[i] = results.validation["pc_loss"][-1]
 
     score = torch.quantile(scores, 0.90)
     return score

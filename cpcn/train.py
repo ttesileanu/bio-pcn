@@ -1,7 +1,7 @@
 """Define utilities for training predictive-coding models. """
 
 from types import SimpleNamespace
-from typing import Optional, Callable, Iterable, Union, Sequence
+from typing import Optional, Callable, Iterable, Union, Sequence, Tuple
 
 import torch
 import numpy as np
@@ -66,7 +66,15 @@ class Trainer:
         self.batch_observers = []
         self.schedulers = []
 
+        # set up the history with storage for tracking the loss and accuracy
         self.history = SimpleNamespace()
+        self._setup_history("train", ["pc_loss", "accuracy"], "epoch", size=1)
+        self._setup_history("validation", ["pc_loss", "accuracy"], "epoch", size=1)
+
+        self._setup_history("batch_train", ["pc_loss", "accuracy"], "batch", size=1)
+        self._setup_history(
+            "batch_validation", ["pc_loss", "accuracy"], "batch", size=1
+        )
 
     def run(
         self, n_epochs: int, progress: Optional[Callable] = None
@@ -75,24 +83,15 @@ class Trainer:
         
         :param n_epochs: number of training epochs
         :param progress: progress indicator; should have `tqdm` interface
+        :return: `self.history`, which contains outputs from any monitors registered
+            with the `self.peek...` functions, as well as the progress of the predictive
+            coding loss (`"pc_loss"`) and `"accuracy"` per-epoch (in `train` and
+            `validation`) and per-batch (in `batch_train` and `batch_validation`)
         """
-        res = SimpleNamespace(train=SimpleNamespace(), validation=SimpleNamespace())
-
-        res.train.pc_loss = []
-        res.train.accuracy = []
-
-        res.validation.pc_loss = []
-        res.validation.accuracy = []
-
+        # set up optimizer for main net and classifier (if any)
         optimizer = self.optimizer_class(
             self.net.slow_parameters(), **self.optimizer_kwargs
         )
-
-        # set up any learning-rate schedulers
-        schedulers = []
-        for constructor in self.schedulers:
-            schedulers.append(constructor(optimizer))
-
         if self.classifier is not None:
             if self.classifier_criterion is None:
                 self.classifier_criterion = torch.nn.MSELoss()
@@ -101,36 +100,37 @@ class Trainer:
                 self.classifier.parameters(), **self.classifier_optim_kwargs
             )
 
+        # set up any learning-rate schedulers
+        schedulers = []
+        for constructor in self.schedulers:
+            schedulers.append(constructor(optimizer))
+
+        # set up progress bar, if any
         if progress is not None:
             epoch_range = progress(range(n_epochs))
         else:
             epoch_range = range(n_epochs)
 
+        # run the training
         self._reset_history()
         for epoch in epoch_range:
-            # train
+            self.net.train()
+            if self.classifier:
+                self.classifier.train()
+
             batch_train_loss = []
             batch_train_accuracy = []
             for i, (x, y) in enumerate(self.train_loader):
-                # check for any observers -- need to know whether to request profiles
-                observers = []
-                need_profile = False
-                for observer, condition, profile in self.batch_observers:
-                    if condition(epoch, i):
-                        observers.append(observer)
-                        if profile:
-                            need_profile = True
-
-                # train main net
+                # train main net, asking for loss+latent profile if needed for obsevers
+                observers, need_profile = self._get_observers(epoch, i)
                 batch_results = self.net.forward_constrained(
                     x, y, pc_loss_profile=need_profile, latent_profile=need_profile
                 )
-                pc_loss = self.net.pc_loss()
-
+                pc_loss = self.net.pc_loss().item()
                 self.net.calculate_weight_grad()
                 optimizer.step()
 
-                # train classifier, if we have one; but don't overwrite latents!
+                # use and train classifier, if we have one; but don't overwrite latents!
                 z_fwd = self.net.forward(x, inplace=False)
                 if self.classifier is not None:
                     y_pred = self.classifier(z_fwd[self.classifier_dim])
@@ -142,25 +142,20 @@ class Trainer:
                 else:
                     y_pred = z_fwd[-1]
 
+                # keep track of per-batch indicators
                 accuracy = self.accuracy_fct(y_pred, y)
-                batch_train_loss.append(pc_loss.item())
+                batch_train_loss.append(pc_loss)
                 batch_train_accuracy.append(accuracy)
 
-                if len(observers) > 0:
-                    batch_ns = SimpleNamespace(
-                        epoch=epoch,
-                        batch=i,
-                        net=self.net,
-                        train_loss=pc_loss,
-                        train_accuracy=accuracy,
-                    )
-                    if need_profile:
-                        batch_ns.pc_loss_profile = batch_results.pc_loss
-                        batch_ns.latent_profile = batch_results.latent
-                    for observer in observers:
-                        observer(batch_ns)
+                # call any batch observers; this also stores training-mode diagnostics
+                self._batch_report(
+                    observers, epoch, i, pc_loss, accuracy, batch_results
+                )
 
             # evaluate performance on validation set
+            self.net.eval()
+            if self.classifier:
+                self.classifier.eval()
             batch_val_loss, batch_val_accuracy = evaluate(
                 self.net,
                 self.validation_loader,
@@ -169,34 +164,15 @@ class Trainer:
                 classifier_dim=self.classifier_dim,
             )
 
-            # store loss and accuracy values
-            epoch_train_loss = np.mean(batch_train_loss)
-            epoch_train_accuracy = np.mean(batch_train_accuracy)
-            epoch_val_loss = np.mean(batch_val_loss)
-            epoch_val_accuracy = np.mean(batch_val_accuracy)
-            res.train.pc_loss.append(epoch_train_loss)
-            res.train.accuracy.append(epoch_train_accuracy)
-            res.validation.pc_loss.append(epoch_val_loss)
-            res.validation.accuracy.append(epoch_val_accuracy)
-
-            # call any epoch observers
-            epoch_ns = SimpleNamespace(
-                epoch=epoch,
-                net=self.net,
-                train_loss=epoch_train_loss,
-                train_accuracy=epoch_train_accuracy,
-                val_loss=epoch_val_loss,
-                val_accuracy=epoch_val_accuracy,
-                batch_profile=SimpleNamespace(
-                    train_loss=batch_train_loss,
-                    train_accuracy=batch_train_accuracy,
-                    val_loss=batch_val_loss,
-                    val_accuracy=batch_val_accuracy,
-                ),
+            # store per-epoch diagnostics for training mode, and per-epoch and per-batch
+            # diagnostics for validation
+            progress_info = self._epoch_report(
+                epoch,
+                batch_train_loss,
+                batch_train_accuracy,
+                batch_val_loss,
+                batch_val_accuracy,
             )
-            for observer, condition in self.epoch_observers:
-                if condition(epoch):
-                    observer(epoch_ns)
 
             # run learning-rate schedulers
             for scheduler in schedulers:
@@ -204,21 +180,124 @@ class Trainer:
 
             # update progress bar, if any
             if progress is not None:
-                epoch_range.set_postfix(
-                    {
-                        "val_loss": f"{epoch_val_loss:.2g}",
-                        "val_acc": f"{epoch_val_accuracy:.2f}",
-                    }
-                )
+                epoch_range.set_postfix(progress_info)
 
+        # convert all history information to tensors
         self._coalesce_history()
 
-        # convert to Numpy
-        for ns in [res.train, res.validation]:
-            ns.pc_loss = np.asarray(ns.pc_loss)
-            ns.accuracy = np.asarray(ns.accuracy)
+        return self.history
 
-        return res
+    def _get_observers(self, epoch: int, i: int) -> Tuple[list, bool]:
+        """Get list of observers that should be called given epoch and batch index, as
+        well as whether there are any that need a loss profile calculation.
+        """
+        observers = []
+        need_profile = False
+        for observer, condition, profile in self.batch_observers:
+            if condition(epoch, i):
+                observers.append(observer)
+                if profile:
+                    need_profile = True
+
+        return observers, need_profile
+
+    def _batch_report(
+        self,
+        observers: list,
+        epoch: int,
+        i: int,
+        pc_loss: float,
+        accuracy: float,
+        batch_results: SimpleNamespace,
+    ):
+        """Send per-batch information to a list of observers, and store training-mode
+        diagnostics in `self.history`.
+        """
+        if len(observers) > 0:
+            batch_ns = SimpleNamespace(
+                epoch=epoch,
+                batch=i,
+                net=self.net,
+                classifier=self.classifier,
+                train_loss=pc_loss,
+                train_accuracy=accuracy,
+            )
+            if hasattr(batch_results, "pc_loss"):
+                batch_ns.pc_loss_profile = batch_results.pc_loss
+            if hasattr(batch_results, "latent"):
+                batch_ns.latent_profile = batch_results.latent
+            for observer in observers:
+                observer(batch_ns)
+
+        # keep track of loss and accuracy
+        target_dict = self.history.batch_train
+        target_dict["epoch"].append(epoch)
+        target_dict["batch"].append(i)
+        target_dict["pc_loss"].append(torch.FloatTensor([pc_loss]))
+        target_dict["accuracy"].append(torch.FloatTensor([accuracy]))
+
+    def _epoch_report(
+        self,
+        epoch,
+        batch_train_loss,
+        batch_train_accuracy,
+        batch_val_loss,
+        batch_val_accuracy,
+    ):
+        """Send information to epoch observers, store training-mode per-epoch
+        diagnostics in `self.history`, and store both per-epoch and per-batch
+        validation-mode diagnostics.
+
+        :return: a dict of progress information for the progress bar
+        """
+        # update training-mode diagnostics
+        epoch_train_loss = np.mean(batch_train_loss)
+        epoch_train_accuracy = np.mean(batch_train_accuracy)
+        epoch_val_loss = np.mean(batch_val_loss)
+        epoch_val_accuracy = np.mean(batch_val_accuracy)
+
+        target_dict = self.history.train
+        target_dict["epoch"].append(epoch)
+        target_dict["pc_loss"].append(torch.FloatTensor([epoch_train_loss]))
+        target_dict["accuracy"].append(torch.FloatTensor([epoch_train_accuracy]))
+
+        # update validation-mode diagnostics
+        target_dict = self.history.validation
+        target_dict["epoch"].append(epoch)
+        target_dict["pc_loss"].append(torch.FloatTensor([epoch_val_loss]))
+        target_dict["accuracy"].append(torch.FloatTensor([epoch_val_accuracy]))
+
+        target_dict = self.history.batch_validation
+        target_dict["epoch"].extend(len(batch_val_loss) * [epoch])
+        target_dict["batch"].extend(list(range(len(batch_val_loss))))
+        target_dict["pc_loss"].append(torch.FloatTensor(batch_val_loss))
+        target_dict["accuracy"].append(torch.FloatTensor(batch_val_accuracy))
+
+        # call any epoch observers
+        epoch_ns = SimpleNamespace(
+            epoch=epoch,
+            net=self.net,
+            classifier=self.classifier,
+            train_loss=epoch_train_loss,
+            train_accuracy=epoch_train_accuracy,
+            val_loss=epoch_val_loss,
+            val_accuracy=epoch_val_accuracy,
+            batch_profile=SimpleNamespace(
+                train_loss=batch_train_loss,
+                train_accuracy=batch_train_accuracy,
+                val_loss=batch_val_loss,
+                val_accuracy=batch_val_accuracy,
+            ),
+        )
+        for observer, condition in self.epoch_observers:
+            if condition(epoch):
+                observer(epoch_ns)
+
+        progress_info = {
+            "val_loss": f"{epoch_val_loss:.2g}",
+            "val_acc": f"{epoch_val_accuracy:.2f}",
+        }
+        return progress_info
 
     def __str__(self) -> str:
         s = f"Trainer(net={str(self.net)}, optimizer_class={str(self.optimizer_class)})"
@@ -303,6 +382,7 @@ class Trainer:
         where the `SimpleNamespace` contains
             epoch:          the index of the epoch that just ended
             net:            the network that is being optimized
+            classifier:     network used for classifier output (if any)
             train_loss:     (predictive-coding) loss on training set
             val_loss:       (predictive-coding) loss on validation set
             train_accuracy: accuracy on training set
@@ -333,6 +413,7 @@ class Trainer:
             epoch:          the index of the epoch that just ended
             batch:          the index of the batch that was just processed
             net:            the network that is being optimized
+            classifier:     network used for classifier output (if any)
             train_loss:     (predictive-coding) loss on training set
             train_accuracy: accuracy on training set
 
@@ -557,14 +638,25 @@ class Trainer:
         target_dict["batch"].extend(batch_size * [ns.batch])
         target_dict["sample"].extend(list(range(batch_size)))
 
-    def _setup_history(self, name: str, vars: Sequence, type: str):
-        """Set up storage for a monitor."""
+    def _setup_history(self, name: str, vars: Sequence, type: str, size: int = 0):
+        """Set up storage for a monitor.
+        
+        Normally whether the variable is multi-layered or not is inferred from the
+        network itself. The argument `size` can be used to override this behavior. If
+        `size` is provided, `self.net` is never accessed.
+        """
         storage = {}
         for var in vars:
-            value = getattr(self.net, var)
-            if isinstance(value, (list, tuple)):
+            if size == 0:
+                value = getattr(self.net, var)
+                if isinstance(value, (list, tuple)):
+                    size = len(value)
+                else:
+                    size = 1
+
+            if size > 1:
                 # this is a multi-layer variable
-                for k in range(len(value)):
+                for k in range(size):
                     storage[var + ":" + str(k)] = None
             else:
                 storage[var] = None

@@ -34,7 +34,7 @@ dataset = load_mnist(n_train=5000, n_validation=1000, device=device)
 n_epochs = 50
 dims = [784, 5, 10]
 it_inference = 50
-lr_inference = 0.01
+lr_inference = 0.04
 
 torch.manual_seed(123)
 
@@ -51,8 +51,8 @@ net = net.to(device)
 trainer = Trainer(net, dataset["train"], dataset["validation"])
 trainer.set_classifier("linear")
 
-trainer.set_optimizer(torch.optim.Adam, lr=0.004)
-trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.988))
+trainer.set_optimizer(torch.optim.Adam, lr=0.005)
+# trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.99))
 
 results = trainer.run(n_epochs, progress=tqdm)
 
@@ -61,28 +61,28 @@ results = trainer.run(n_epochs, progress=tqdm)
 
 # %%
 with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
-    ax1.semilogy(results.train.pc_loss, label="train")
-    ax1.semilogy(results.validation.pc_loss, label="val")
+    ax1.semilogy(results.train["pc_loss"], label="train")
+    ax1.semilogy(results.validation["pc_loss"], label="val")
     ax1.set_xlabel("epoch")
     ax1.set_ylabel("predictive-coding loss")
     ax1.legend(frameon=False)
-    last_loss = results.train.pc_loss[-1]
-    ax1.annotate(f"{last_loss:.3f}", (len(results.train.pc_loss), last_loss), c="C0")
-    last_loss = results.validation.pc_loss[-1]
+    last_loss = results.train["pc_loss"][-1]
+    ax1.annotate(f"{last_loss:.3f}", (len(results.train["pc_loss"]), last_loss), c="C0")
+    last_loss = results.validation["pc_loss"][-1]
     ax1.annotate(
-        f"{last_loss:.3f}", (len(results.validation.pc_loss), last_loss), c="C1"
+        f"{last_loss:.3f}", (len(results.validation["pc_loss"]), last_loss), c="C1"
     )
 
-    ax2.plot(100 * (1 - results.train.accuracy), label="train")
-    ax2.plot(100 * (1 - results.validation.accuracy), label="val")
+    ax2.plot(100 * (1 - results.train["accuracy"]), label="train")
+    ax2.plot(100 * (1 - results.validation["accuracy"]), label="val")
     ax2.set_xlabel("epoch")
     ax2.set_ylabel("error rate (%)")
     ax2.legend(frameon=False)
-    last_acc = 100 * (1 - results.train.accuracy[-1])
-    ax2.annotate(f"{last_acc:.1f}%", (len(results.train.accuracy), last_acc), c="C0")
-    last_acc = 100 * (1 - results.validation.accuracy[-1])
+    last_acc = 100 * (1 - results.train["accuracy"][-1])
+    ax2.annotate(f"{last_acc:.1f}%", (len(results.train["accuracy"]), last_acc), c="C0")
+    last_acc = 100 * (1 - results.validation["accuracy"][-1])
     ax2.annotate(
-        f"{last_acc:.1f}%", (len(results.validation.accuracy), last_acc), c="C1"
+        f"{last_acc:.1f}%", (len(results.validation["accuracy"]), last_acc), c="C1"
     )
     ax2.set_ylim(0, 100)
 
@@ -91,7 +91,7 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
 
 # %%
 z_it = 50
-z_lr = 0.15
+z_lr = 0.1
 
 torch.manual_seed(123)
 
@@ -118,8 +118,8 @@ cpcn_net = cpcn_net.to(device)
 cpcn_trainer = Trainer(cpcn_net, dataset["train"], dataset["validation"])
 cpcn_trainer.set_classifier("linear")
 
-cpcn_trainer.set_optimizer(torch.optim.SGD, lr=0.01)
-cpcn_trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.997))
+cpcn_trainer.set_optimizer(torch.optim.Adam, lr=0.002)
+# cpcn_trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.997))
 
 cpcn_results = cpcn_trainer.run(n_epochs, progress=tqdm)
 
@@ -129,20 +129,20 @@ cpcn_results = cpcn_trainer.run(n_epochs, progress=tqdm)
 # %%
 with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
     ax1.semilogy(
-        results.train.pc_loss, c="C0", ls="--", alpha=0.7, label="Whittington&Bogacz"
+        results.train["pc_loss"], c="C0", ls="--", alpha=0.7, label="Whittington&Bogacz"
     )
-    ax1.semilogy(results.validation.pc_loss, c="C1", ls="--", alpha=0.7)
+    ax1.semilogy(results.validation["pc_loss"], c="C1", ls="--", alpha=0.7)
 
-    ax1.semilogy(cpcn_results.train.pc_loss, c="C0", label="train")
-    ax1.semilogy(cpcn_results.validation.pc_loss, c="C1", label="val")
+    ax1.semilogy(cpcn_results.train["pc_loss"], c="C0", label="train")
+    ax1.semilogy(cpcn_results.validation["pc_loss"], c="C1", label="val")
 
-    last_loss = results.validation.pc_loss[-1]
+    last_loss = results.validation["pc_loss"][-1]
     ax1.annotate(
-        f"{last_loss:.3f}", (len(results.validation.pc_loss), last_loss), c="C1"
+        f"{last_loss:.3f}", (len(results.validation["pc_loss"]), last_loss), c="C1"
     )
-    last_loss = cpcn_results.validation.pc_loss[-1]
+    last_loss = cpcn_results.validation["pc_loss"][-1]
     ax1.annotate(
-        f"{last_loss:.3f}", (len(cpcn_results.validation.pc_loss), last_loss), c="C1"
+        f"{last_loss:.3f}", (len(cpcn_results.validation["pc_loss"]), last_loss), c="C1"
     )
 
     ax1.set_xlabel("epoch")
@@ -150,25 +150,25 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
     ax1.legend(frameon=False)
 
     ax2.plot(
-        100 * (1 - results.train.accuracy),
+        100 * (1 - results.train["accuracy"]),
         c="C0",
         ls="--",
         alpha=0.7,
         label="Whittington&Bogacz",
     )
-    ax2.plot(100 * (1 - results.validation.accuracy), c="C1", ls="--", alpha=0.7)
-    ax2.plot(100 * (1 - cpcn_results.train.accuracy), c="C0", label="train")
-    ax2.plot(100 * (1 - cpcn_results.validation.accuracy), c="C1", label="val")
+    ax2.plot(100 * (1 - results.validation["accuracy"]), c="C1", ls="--", alpha=0.7)
+    ax2.plot(100 * (1 - cpcn_results.train["accuracy"]), c="C0", label="train")
+    ax2.plot(100 * (1 - cpcn_results.validation["accuracy"]), c="C1", label="val")
     ax2.set_xlabel("epoch")
     ax2.set_ylabel("error rate (%)")
 
-    last_acc = 100 * (1 - results.validation.accuracy[-1])
+    last_acc = 100 * (1 - results.validation["accuracy"][-1])
     ax2.annotate(
-        f"{last_acc:.1f}%", (len(results.validation.accuracy), last_acc), c="C1"
+        f"{last_acc:.1f}%", (len(results.validation["accuracy"]), last_acc), c="C1"
     )
-    last_acc = 100 * (1 - cpcn_results.validation.accuracy[-1])
+    last_acc = 100 * (1 - cpcn_results.validation["accuracy"][-1])
     ax2.annotate(
-        f"{last_acc:.1f}%", (len(cpcn_results.validation.accuracy), last_acc), c="C1"
+        f"{last_acc:.1f}%", (len(cpcn_results.validation["accuracy"]), last_acc), c="C1"
     )
 
     ax2.legend(frameon=False)
