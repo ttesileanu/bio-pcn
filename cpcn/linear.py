@@ -22,6 +22,7 @@ class LinearCPCNetwork:
         g_b: Union[Sequence, float] = 1.0,
         l_s: Union[Sequence, float] = 1.0,
         c_m: Union[Sequence, float] = 1.0,
+        rho: Union[Sequence, float] = 1.0,
         bias_a: bool = True,
         bias_b: bool = True,
         fast_optimizer: Callable = torch.optim.Adam,
@@ -37,6 +38,8 @@ class LinearCPCNetwork:
         :param g_b: basal conductances
         :param l_s: leak conductance
         :param c_m: strength of lateral connections
+        :param rho: squared radius for whiteness constraint; that is, the constraint is
+            cov_matrix(z) <= rho * identity_matrix
         :param bias_a: whether to have bias terms at the apical end
         :param bias_b: whether to have bias terms at the basal end
         :param fast_optimizer: constructor for the optimizer used for the fast dynamics
@@ -60,6 +63,7 @@ class LinearCPCNetwork:
         self.g_b = self._expand_per_layer(g_b)
         self.l_s = self._expand_per_layer(l_s)
         self.c_m = self._expand_per_layer(c_m)
+        self.rho = self._expand_per_layer(rho)
 
         self.bias_a = bias_a
         self.bias_b = bias_b
@@ -268,7 +272,7 @@ class LinearCPCNetwork:
             # inter
             pre = self.z[i + 1]
             post = self.n[i]
-            grad = self.g_a[i] * (self.Q[i] - batch_outer(post, pre))
+            grad = self.g_a[i] * (self.rho[i] * self.Q[i] - batch_outer(post, pre))
             if grad.ndim == self.Q[i].ndim + 1:
                 # this is a batch evaluation!
                 grad = red_fct(grad, 0)

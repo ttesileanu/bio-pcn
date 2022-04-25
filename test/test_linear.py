@@ -633,7 +633,7 @@ def linear_cpcn_loss(net: LinearCPCNetwork, reduction: str = "sum") -> torch.Ten
         apical = 0.5 * net.g_a[i] * apical0
 
         # need to flip this for Q because we're maximizing!!
-        z_cons = batch_outer(z, z) - torch.eye(z.shape[-1])
+        z_cons = batch_outer(z, z) - net.rho[i] * torch.eye(z.shape[-1])
         q_prod = net.Q[i].T @ net.Q[i]
         constraint0 = (q_prod @ z_cons).diagonal(dim1=-1, dim2=-2).sum(dim=-1)
         constraint = -0.5 * net.g_a[i] * constraint0
@@ -979,3 +979,70 @@ def test_train(net):
 def test_eval(net):
     net.eval()
     assert not net.training
+
+
+@pytest.fixture
+def net_nontrivial_constraint():
+    # ensure non-trivial conductances *and* non-trivial constraints
+    net = LinearCPCNetwork(
+        [3, 4, 5, 2],
+        g_a=[0.4, 0.8],
+        g_b=[1.2, 0.5],
+        c_m=[0.3, 0.7],
+        l_s=[2.5, 1.8],
+        rho=[0.7, 1.5],
+    )
+    return net
+
+
+def test_foward_constrained_unaffected_by_nontrivial_constraint(net):
+    x = torch.FloatTensor([-0.1, 0.2, 0.4])
+    y = torch.FloatTensor([0.3, -0.4])
+    net.forward_constrained(x, y)
+
+    old_z = [_.detach().clone() for _ in net.z]
+
+    net.rho[0] = 0.7
+    net.rho[1] = 1.5
+    net.forward_constrained(x, y)
+
+    for old, new in zip(old_z, net.z):
+        assert torch.allclose(old, new)
+
+
+def test_q_gradient_with_nontrivial_constraint(net_nontrivial_constraint, data):
+    net = net_nontrivial_constraint
+    net.forward_constrained(data.x, data.y)
+    net.calculate_weight_grad()
+
+    outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
+    for i in range(len(net.inter_dims)):
+        expected = net.g_a[i] * (
+            net.rho[i] * net.Q[i] - outer(net.n[i], net.z[i + 1])
+        ).mean(dim=0)
+        assert torch.allclose(net.Q[i].grad, expected)
+
+
+def test_q_gradient_with_nontrivial_constraint_vs_autograd(net_nontrivial_constraint):
+    net = net_nontrivial_constraint
+
+    x = torch.FloatTensor([-0.1, 0.2, 0.4])
+    y = torch.FloatTensor([0.3, -0.4])
+    net.forward_constrained(x, y)
+    net.calculate_weight_grad()
+
+    manual_grads = [_.grad.clone().detach() for _ in net.Q]
+
+    for param in net.slow_parameters():
+        param.requires_grad_()
+        if param.grad is not None:
+            param.grad.detach_()
+            param.grad.zero_()
+
+    loss = linear_cpcn_loss(net)
+    loss.backward()
+
+    loss_grads = [_.grad.clone().detach() for _ in net.Q]
+
+    for from_manual, from_loss in zip(manual_grads, loss_grads):
+        assert torch.allclose(from_manual, from_loss)
