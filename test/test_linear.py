@@ -633,6 +633,8 @@ def linear_cpcn_loss(net: LinearCPCNetwork, reduction: str = "sum") -> torch.Ten
         apical = 0.5 * net.g_a[i] * apical0
 
         # need to flip this for Q because we're maximizing!!
+        # but note that this would lead to incorrect dynamics for the latents!
+        # (we get away with it because we don't use this objective for z dynamics)
         z_cons = batch_outer(z, z) - net.rho[i] * torch.eye(z.shape[-1])
         q_prod = net.Q[i].T @ net.Q[i]
         constraint0 = (q_prod @ z_cons).diagonal(dim1=-1, dim2=-2).sum(dim=-1)
