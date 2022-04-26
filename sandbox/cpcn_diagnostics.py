@@ -1,5 +1,5 @@
 # %% [markdown]
-# # Diagnosing CPCN
+# # Diagnosing BioPCN
 
 from types import SimpleNamespace
 from functools import partial
@@ -10,7 +10,7 @@ import torch
 
 from tqdm.notebook import tqdm
 
-from cpcn import LinearCPCNetwork, load_mnist, Trainer
+from cpcn import LinearBioPCN, load_mnist, Trainer
 
 # %% [markdown]
 # ## Setup
@@ -27,7 +27,7 @@ dataset = load_mnist(
 )
 
 # %% [markdown]
-# ## Train CPCN
+# ## Train BioPCN
 
 n_epochs = 50
 dims = [784, 5, 10]
@@ -44,7 +44,7 @@ g_a[-1] *= 2
 g_b = 0.5 * torch.ones(len(dims) - 2)
 g_b[0] *= 2
 
-net = LinearCPCNetwork(
+net = LinearBioPCN(
     dims,
     z_lr=z_lr,
     z_it=z_it,

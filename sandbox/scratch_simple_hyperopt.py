@@ -8,7 +8,7 @@ import pydove as dv
 from tqdm.notebook import tqdm
 
 import torch
-from cpcn import LinearCPCNetwork, load_mnist, Trainer
+from cpcn import LinearBioPCN, load_mnist, Trainer
 
 import optuna
 from optuna.trial import TrialState
@@ -27,7 +27,7 @@ def optuna_reporter(trial: optuna.trial.Trial, ns: SimpleNamespace):
         raise optuna.exceptions.TrialPruned()
 
 
-def create_cpcn(trial):
+def create_biopcn(trial):
     dims = [28 * 28, 5, 10]
 
     z_lr = trial.suggest_float("z_lr", 0.01, 0.4, log=True)
@@ -40,7 +40,7 @@ def create_cpcn(trial):
     g_b = 0.5 * torch.ones(len(dims) - 2)
     g_b[0] *= 2
 
-    net = LinearCPCNetwork(
+    net = LinearBioPCN(
         dims,
         z_lr=z_lr,
         z_it=50,
@@ -66,7 +66,7 @@ def objective(
     scores = torch.zeros(n_rep)
     for i in range(n_rep):
         torch.manual_seed(seed + i)
-        net = create_cpcn(trial).to(device)
+        net = create_biopcn(trial).to(device)
 
         # optimizer_type = trial.suggest_categorical("optimizer", ["Adam", "RMSprop", "SGD"])
         # optimizer_class = getattr(torch.optim, optimizer_type)
@@ -133,7 +133,7 @@ optuna.visualization.matplotlib.plot_param_importances(study)
 
 # %%
 
-with open("hyperopt_cpcn.pkl", "wb") as f:
+with open("hyperopt_biopcn.pkl", "wb") as f:
     pickle.dump(study, f)
 
 # %%

@@ -9,7 +9,7 @@ import torch.nn as nn
 import numpy as np
 
 
-class LinearCPCNetwork:
+class LinearBioPCN:
     """Linear constrained-predictive coding network."""
 
     def __init__(
@@ -497,7 +497,7 @@ class LinearCPCNetwork:
 
     def __str__(self) -> str:
         s = (
-            f"LinearCPCNetwork(pyr_dims={str(self.pyr_dims)}, "
+            f"LinearBioPCN(pyr_dims={str(self.pyr_dims)}, "
             f"inter_dims={str(self.inter_dims)}, "
             f"bias_a={self.bias_a}, "
             f"bias_b={self.bias_b}"
@@ -507,7 +507,7 @@ class LinearCPCNetwork:
 
     def __repr__(self) -> str:
         s = (
-            f"LinearCPCNetwork("
+            f"LinearBioPCN("
             f"pyr_dims={repr(self.pyr_dims)}, "
             f"inter_dims={repr(self.inter_dims)}, "
             f"bias_a={self.bias_a}, "

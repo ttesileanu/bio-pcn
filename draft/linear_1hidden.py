@@ -12,7 +12,7 @@ import pickle
 from tqdm.notebook import tqdm
 from functools import partial
 
-from cpcn import LinearCPCNetwork, PCNetwork, load_mnist, Trainer
+from cpcn import LinearBioPCN, PCNetwork, load_mnist, Trainer
 
 # %% [markdown]
 # ## Setup
@@ -77,7 +77,7 @@ for i in tqdm(range(n_reps), desc="repetitions"):
     # train CPCN
     torch.manual_seed(seed + i)
 
-    cpcn = LinearCPCNetwork(
+    cpcn = LinearBioPCN(
         dims,
         z_lr=best_cpcn["z_lr"],
         z_it=50,
@@ -95,7 +95,7 @@ for i in tqdm(range(n_reps), desc="repetitions"):
     cpcn_trainer.set_optimizer(torch.optim.Adam, lr=best_cpcn["lr"])
     # cpcn_trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.997))
 
-    cpcn_out = cpcn_trainer.run(n_epochs, progress=partial(tqdm, desc="CPCN"))
+    cpcn_out = cpcn_trainer.run(n_epochs, progress=partial(tqdm, desc="BioPCN"))
 
     # store the results
     pcn_results.append({"trainer": pcn_trainer, "output": pcn_out, "net": pcn})
@@ -123,7 +123,7 @@ with dv.FigureManager() as (_, ax):
         ax.plot(crt_cpcn["output"].validation["pc_loss"], c="C1", alpha=0.5, lw=0.5)
 
     ax.plot([], c="C0", lw=0.5, label="Whittington&Bogacz")
-    ax.plot([], c="C1", lw=0.5, label="CPCN")
+    ax.plot([], c="C1", lw=0.5, label="BioPCN")
 
     ax.legend(frameon=False)
 

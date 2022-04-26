@@ -2,7 +2,7 @@ import pytest
 
 from types import SimpleNamespace
 
-from cpcn.linear import LinearCPCNetwork
+from cpcn.linear import LinearBioPCN
 from cpcn.pcn import PCNetwork
 
 import torch
@@ -12,7 +12,7 @@ import numpy as np
 @pytest.fixture
 def net():
     # ensure non-trivial conductances
-    net = LinearCPCNetwork(
+    net = LinearBioPCN(
         [3, 4, 5, 2], g_a=[0.4, 0.8], g_b=[1.2, 0.5], c_m=[0.3, 0.7], l_s=[2.5, 1.8]
     )
     return net
@@ -20,19 +20,19 @@ def net():
 
 @pytest.fixture
 def net_inter_dims():
-    net = LinearCPCNetwork([3, 4, 5, 2], inter_dims=[2, 7])
+    net = LinearBioPCN([3, 4, 5, 2], inter_dims=[2, 7])
     return net
 
 
 @pytest.fixture
 def net_no_bias_a():
-    net = LinearCPCNetwork([5, 3, 4, 3], bias_a=False)
+    net = LinearBioPCN([5, 3, 4, 3], bias_a=False)
     return net
 
 
 @pytest.fixture
 def net_no_bias_b():
-    net = LinearCPCNetwork([2, 6, 2], bias_b=False)
+    net = LinearBioPCN([2, 6, 2], bias_b=False)
     return net
 
 
@@ -221,12 +221,12 @@ def test_initial_params_same_when_torch_seed_is_same(which: str):
     dims = [2, 6, 5, 3]
 
     torch.manual_seed(seed)
-    net = LinearCPCNetwork(dims)
+    net = LinearBioPCN(dims)
 
     old = [_.clone().detach() for _ in getattr(net, which)]
 
     torch.manual_seed(seed)
-    net = LinearCPCNetwork(dims)
+    net = LinearBioPCN(dims)
 
     new = [_.clone().detach() for _ in getattr(net, which)]
 
@@ -240,11 +240,11 @@ def test_initial_params_change_for_subsequent_calls_if_seed_not_reset(which: str
     dims = [2, 6, 5, 3]
 
     torch.manual_seed(seed)
-    net = LinearCPCNetwork(dims)
+    net = LinearBioPCN(dims)
 
     old = [_.clone().detach() for _ in getattr(net, which)]
 
-    net = LinearCPCNetwork(dims)
+    net = LinearBioPCN(dims)
     new = [_.clone().detach() for _ in getattr(net, which)]
 
     for crt_old, crt_new in zip(old, new):
@@ -401,14 +401,14 @@ def test_on_shell_after_relax(net):
 @pytest.mark.parametrize("which", ["g_a", "g_b", "c_m", "l_s"])
 def test_allow_tensor_conductances_in_constructor(which):
     kwargs = {which: torch.FloatTensor([1.3, 2.5])}
-    pcn = LinearCPCNetwork([2, 5, 4, 3], **kwargs)
+    pcn = LinearBioPCN([2, 5, 4, 3], **kwargs)
     assert getattr(pcn, which).shape == (2,)
 
 
 @pytest.mark.parametrize("which", ["g_a", "g_b", "c_m", "l_s"])
 def test_allow_scalar_tensor_conductances_in_constructor(which):
     kwargs = {which: torch.FloatTensor([1.3])}
-    pcn = LinearCPCNetwork([2, 5, 4, 3], **kwargs)
+    pcn = LinearBioPCN([2, 5, 4, 3], **kwargs)
     assert getattr(pcn, which).shape == (2,)
 
 
@@ -427,7 +427,7 @@ def test_cpcn_pc_loss_matches_pcn_loss_with_appropriate_params():
 
     g_a[-1] *= 2
     g_b[0] *= 2
-    cpcn = LinearCPCNetwork(dims, g_a=g_a, g_b=g_b, c_m=0, l_s=g_b)
+    cpcn = LinearBioPCN(dims, g_a=g_a, g_b=g_b, c_m=0, l_s=g_b)
 
     # match the weights
     D = len(dims) - 2
@@ -450,7 +450,7 @@ def test_cpcn_pc_loss_matches_pcn_loss_with_appropriate_params():
 
 
 def test_init_params_with_numpy_scalar():
-    net = LinearCPCNetwork([2, 3, 4], g_a=np.asarray([0.5]))
+    net = LinearBioPCN([2, 3, 4], g_a=np.asarray([0.5]))
 
 
 def test_to_returns_self(net):
@@ -460,14 +460,14 @@ def test_to_returns_self(net):
 def test_repr(net):
     s = repr(net)
 
-    assert s.startswith("LinearCPCNetwork(")
+    assert s.startswith("LinearBioPCN(")
     assert s.endswith(")")
 
 
 def test_str(net):
     s = str(net)
 
-    assert s.startswith("LinearCPCNetwork(")
+    assert s.startswith("LinearBioPCN(")
     assert s.endswith(")")
 
 
@@ -608,7 +608,7 @@ def test_no_nan_or_inf_after_a_few_learning_steps(net):
         assert torch.all(torch.isfinite(z))
 
 
-def linear_cpcn_loss(net: LinearCPCNetwork, reduction: str = "sum") -> torch.Tensor:
+def linear_cpcn_loss(net: LinearBioPCN, reduction: str = "sum") -> torch.Tensor:
     D = len(net.inter_dims)
     batch_size = 1 if net.z[0].ndim == 1 else len(net.z[0])
     loss = torch.zeros(batch_size)
@@ -972,7 +972,7 @@ def test_eval(net):
 @pytest.fixture
 def net_nontrivial_constraint():
     # ensure non-trivial conductances *and* non-trivial constraints
-    net = LinearCPCNetwork(
+    net = LinearBioPCN(
         [3, 4, 5, 2],
         g_a=[0.4, 0.8],
         g_b=[1.2, 0.5],
