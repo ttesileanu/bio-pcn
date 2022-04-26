@@ -15,6 +15,8 @@ from cpcn import LinearBioPCN, load_mnist, Trainer
 # %% [markdown]
 # ## Setup
 
+# %%
+
 device = torch.device("cpu")
 
 # for reproducibility
@@ -28,6 +30,8 @@ dataset = load_mnist(
 
 # %% [markdown]
 # ## Train BioPCN
+
+# %%
 
 n_epochs = 50
 dims = [784, 5, 10]
@@ -77,6 +81,8 @@ results = trainer.run(n_epochs, progress=tqdm)
 # %% [markdown]
 # ## Check convergence of latent variables
 
+# %%
+
 with dv.FigureManager() as (_, ax):
     cmap = mpl.cm.winter
     crt_sel = trainer.history.fast["sample"] == batch_size - 1
@@ -99,6 +105,8 @@ with dv.FigureManager() as (_, ax):
 
 # %% [markdown]
 # ## Check whitening constraint in hidden layer
+
+# %%
 
 hidden_size = net.pyr_dims[1]
 z_cov = torch.zeros((n_epochs, hidden_size, hidden_size))
@@ -124,16 +132,18 @@ with dv.FigureManager() as (_, ax):
 # %% [markdown]
 # ## Show loss and accuracy evolution
 
+# %%
+
 with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
-    ax1.plot(results.train.pc_loss, label="train")
-    ax1.plot(results.validation.pc_loss, label="val")
+    ax1.plot(results.train["pc_loss"], label="train")
+    ax1.plot(results.validation["pc_loss"], label="val")
     ax1.legend(frameon=False)
     ax1.set_yscale("log")
     ax1.set_xlabel("epoch")
     ax1.set_ylabel("predictive-coding loss")
 
-    ax2.plot(100 * (1.0 - results.train.accuracy), label="train")
-    ax2.plot(100 * (1.0 - results.validation.accuracy), label="val")
+    ax2.plot(100 * (1.0 - results.train["accuracy"]), label="train")
+    ax2.plot(100 * (1.0 - results.validation["accuracy"]), label="val")
     ax2.legend(frameon=False)
     ax2.set_ylim(0, None)
     ax2.set_xlabel("epoch")
@@ -141,6 +151,8 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
 
 # %% [markdown]
 # ## Check weight evolution
+
+# %%
 
 D = len(net.inter_dims)
 with dv.FigureManager(2, D, squeeze=False) as (_, axs):
