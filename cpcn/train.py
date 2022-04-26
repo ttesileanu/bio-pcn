@@ -2,11 +2,12 @@
 
 from types import SimpleNamespace
 from typing import Optional, Callable, Iterable, Union, Sequence, Tuple
+from collections import OrderedDict
 
 import torch
 import numpy as np
 
-from .util import one_hot_accuracy
+from .util import one_hot_accuracy, hierarchical_get
 
 
 class Trainer:
@@ -341,7 +342,14 @@ class Trainer:
                 else:
                     dims = self.net.pyr_dims
                 self.classifier = torch.nn.Sequential(
-                    torch.nn.Linear(dims[self.classifier_dim], dims[-1])
+                    OrderedDict(
+                        [
+                            (
+                                "linear",
+                                torch.nn.Linear(dims[self.classifier_dim], dims[-1]),
+                            )
+                        ]
+                    )
                 )
             else:
                 raise ValueError("Invalid classifier type")
@@ -581,7 +589,10 @@ class Trainer:
                 continue
 
             var, *parts = var.split(":")
-            value = getattr(ns.net, var)
+            if "." not in var:
+                value = getattr(ns.net, var)
+            else:
+                value = hierarchical_get(ns, var)
             if len(parts) > 0:
                 # this is part of a multi-layer variable
                 k = int(parts[-1])
@@ -648,7 +659,12 @@ class Trainer:
         storage = {}
         for var in vars:
             if size == 0:
-                value = getattr(self.net, var)
+                if "." not in var:
+                    value = getattr(self.net, var)
+                else:
+                    if not var.startswith("classifier"):
+                        raise ValueError(f"can't parse variable name, {var}")
+                    value = hierarchical_get(self, var)
                 if isinstance(value, (list, tuple)):
                     size = len(value)
                 else:
