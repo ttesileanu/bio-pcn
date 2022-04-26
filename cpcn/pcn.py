@@ -36,7 +36,7 @@ class PCNetwork(object):
         :param rho: parameter(s) for the whitening inequality
         :param bias: whether to include a bias term
         :param fast_optimizer: constructor for the optimizer used for the fast dynamics
-            in `forward_constrained`
+            in `relax`
         """
         self.training = True
 
@@ -125,7 +125,7 @@ class PCNetwork(object):
 
         return z
 
-    def forward_constrained(
+    def relax(
         self,
         x: torch.Tensor,
         y: torch.Tensor,

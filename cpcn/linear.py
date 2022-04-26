@@ -43,7 +43,7 @@ class LinearCPCNetwork:
         :param bias_a: whether to have bias terms at the apical end
         :param bias_b: whether to have bias terms at the basal end
         :param fast_optimizer: constructor for the optimizer used for the fast dynamics
-            in `forward_constrained`
+            in `relax`
         """
         self.training = True
 
@@ -137,7 +137,7 @@ class LinearCPCNetwork:
 
         return z
 
-    def forward_constrained(
+    def relax(
         self,
         x: torch.Tensor,
         y: torch.Tensor,
@@ -228,9 +228,8 @@ class LinearCPCNetwork:
     def calculate_weight_grad(self, reduction: str = "mean"):
         """Calculate gradients for slow (weight) variables.
 
-        This assumes that the fast variables have been calculated, using
-        `forward_constrained`. The calculated gradients are assigned the `grad`
-        attribute of each weight tensor.
+        This assumes that the fast variables have been calculated, using `relax()`. The
+        calculated gradients are assigned the `grad` attribute of each weight tensor.
 
         Note that these gradients do not follow from `self.pc_loss()`! While there is a
         modified loss that can generate both the latent- and weight-gradients in the
