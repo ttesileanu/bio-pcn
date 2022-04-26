@@ -255,11 +255,11 @@ class PCNetwork(object):
         if not ignore_whitening and self.whitening:
             batch_outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
             for i in range(len(self.dims) - 1):
-                z = self.z[i + 1]
-                cons = batch_outer(z, z) - self.rho[i] * torch.eye(z.shape[-1])
+                fz = self.activation[i](self.z[i + 1])
+                cons = batch_outer(fz, fz) - self.rho[i] * torch.eye(fz.shape[-1])
                 q_prod = self.Q[i].T @ self.Q[i]
                 constraint0 = (q_prod @ cons).diagonal(dim1=-1, dim2=-2).sum(dim=-1)
-                loss += (-1 / self.variances[i]) * constraint0
+                loss += constraint0 / self.variances[i]
 
         if reduction == "sum":
             loss = loss.sum()
@@ -281,9 +281,10 @@ class PCNetwork(object):
         """Calculate gradients for slow (weight) variables.
 
         This is equivalent to using `backward()` on the output from `self.loss()`
-        (after zeroing all the gradients) and is only provided here for consistency with
-        constrained predictive-coding networks, where the gradients are calculated
-        manually.
+        (after zeroing all the gradients) *and flipping the sign for the gradient of
+        the `Q` parameters* (if `self.whitening` is true). The latter is because the
+        optimizing needs to maximize over `Q` while minimizing over all the other
+        paramters.
 
         :param reduction: reduction to apply to the gradients: `"mean" | "sum"`
         """
@@ -292,6 +293,11 @@ class PCNetwork(object):
 
         loss = self.loss(reduction=reduction)
         loss.backward()
+
+        # need to flip the sign of the whitening Lagrange multipliers, if any
+        if self.whitening:
+            for Q in self.Q:
+                Q.grad = -Q.grad
 
     def train(self):
         """ Set in training mode. """

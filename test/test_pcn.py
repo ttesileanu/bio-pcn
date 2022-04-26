@@ -676,10 +676,11 @@ def test_q_gradient_with_whitening(net_whitening, data):
 
     outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
     for i in range(len(net.dims) - 1):
-        n = net.z[i + 1] @ net.Q[i].T
-        expected = (1 / net.variances[i]) * (
-            net.rho[i] * net.Q[i] - outer(n, net.z[i + 1])
-        ).mean(dim=0)
+        fz = net.activation[i](net.z[i + 1])
+        n = fz @ net.Q[i].T
+        expected = (1 / net.variances[i]) * (net.rho[i] * net.Q[i] - outer(n, fz)).mean(
+            dim=0
+        )
         assert torch.allclose(net.Q[i].grad, expected, atol=1e-6)
 
 
@@ -699,6 +700,8 @@ def test_calculate_weight_grad_matches_backward_on_loss_whitening(
 
     loss = net.loss(reduction=red)
     loss.backward()
+    for Q in net.Q:
+        Q.grad = -Q.grad
 
     for old, new_param in zip(old_grad, net.slow_parameters()):
         assert torch.allclose(old, new_param.grad)
@@ -720,6 +723,7 @@ def test_loss_ignore_whitening_works(data):
 
 
 def test_pc_loss_ignores_whitening_by_default(net_whitening, data):
+    net_whitening.forward_constrained(data.x, data.y)
     loss1 = net_whitening.loss()
     loss1_i = net_whitening.loss(ignore_whitening=True)
 
@@ -727,3 +731,73 @@ def test_pc_loss_ignores_whitening_by_default(net_whitening, data):
 
     loss2 = net_whitening.pc_loss()
     assert loss2.item() == pytest.approx(loss1_i.item())
+
+
+def get_sample_z_gradient(net):
+    # calculate the gradient but don't update z
+    net.fast_optimizer = torch.optim.SGD
+    net.it_inference = 1
+    net.lr_inference = 0
+
+    x = torch.FloatTensor([-0.1, 0.3, 0.4])
+    y = torch.FloatTensor([0.3, -0.4])
+    net.forward_constrained(x, y)
+
+    # XXX after one step only the last hidden layer should have non-zero gradient when
+    #     we start with state from `net.forward()`... that should be enough for this
+    #     test, though
+    grad_z = [_.grad.detach().clone() for _ in net.z[1:-1]]
+
+    return grad_z
+
+
+@pytest.fixture
+def net_ntv():  # non-trivial variances
+    torch.manual_seed(20392)
+    net = PCNetwork([3, 4, 5, 2], variances=[0.2, 1.5, 0.9], activation=torch.tanh)
+    return net
+
+
+def test_z_dynamics(net_ntv):
+    net = net_ntv
+    grad_z = get_sample_z_gradient(net)
+    activation = torch.tanh
+    der_activation = lambda _: 1 / torch.cosh(_) ** 2
+    for i in range(1, len(net.dims) - 1):
+        mu = activation(net.z[i - 1]) @ net.W[i - 1].T + net.b[i - 1]
+        diff = net.z[i] - mu
+        grad1 = diff / net.variances[i - 1]
+
+        mu = activation(net.z[i]) @ net.W[i].T + net.b[i]
+        diff = net.z[i + 1] - mu
+        der = der_activation(net.z[i])
+        grad2 = der * (diff @ net.W[i]) / net.variances[i]
+        expected = grad1 - grad2
+        assert torch.allclose(expected, grad_z[i - 1])
+
+
+def test_z_dynamics_uses_correct_sign_for_whitening(net_whitening):
+    net = net_whitening
+    activation = torch.tanh
+    variances = [1.5, 0.3, 2.5]
+    for i in range(len(net.activation)):
+        net.activation[i] = activation
+        net.variances[i] = variances[i]
+
+    grad_z = get_sample_z_gradient(net)
+    der_activation = lambda _: 1 / torch.cosh(_) ** 2
+    for i in range(1, len(net.dims) - 1):
+        mu = activation(net.z[i - 1]) @ net.W[i - 1].T + net.b[i - 1]
+        diff = net.z[i] - mu
+        grad1 = diff / net.variances[i - 1]
+
+        mu = activation(net.z[i]) @ net.W[i].T + net.b[i]
+        diff = net.z[i + 1] - mu
+        der = der_activation(net.z[i])
+        grad2 = der * (diff @ net.W[i]) / net.variances[i]
+
+        fz = activation(net.z[i])
+        grad3 = der * (fz @ net.Q[i - 1].T @ net.Q[i - 1]) / net.variances[i - 1]
+
+        expected = grad1 - grad2 + grad3
+        assert torch.allclose(expected, grad_z[i - 1])
