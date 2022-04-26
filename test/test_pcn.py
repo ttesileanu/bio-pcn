@@ -702,3 +702,28 @@ def test_calculate_weight_grad_matches_backward_on_loss_whitening(
 
     for old, new_param in zip(old_grad, net.slow_parameters()):
         assert torch.allclose(old, new_param.grad)
+
+
+def test_loss_ignore_whitening_works(data):
+    torch.manual_seed(20392)
+    net1 = PCNetwork([3, 4, 5, 2], whitening=True, rho=[0.2, 1.5, 0.7])
+    net1.forward_constrained(data.x, data.y)
+    loss1 = net1.loss(ignore_whitening=True)
+
+    torch.manual_seed(20392)
+    net2 = PCNetwork([3, 4, 5, 2], whitening=True, rho=[0.2, 1.5, 0.7])
+    net2.forward_constrained(data.x, data.y)
+    net2.whitening = False
+    loss2 = net2.loss()
+
+    assert loss1.item() == pytest.approx(loss2.item())
+
+
+def test_pc_loss_ignores_whitening_by_default(net_whitening, data):
+    loss1 = net_whitening.loss()
+    loss1_i = net_whitening.loss(ignore_whitening=True)
+
+    assert loss1.item() != pytest.approx(loss1_i.item())
+
+    loss2 = net_whitening.pc_loss()
+    assert loss2.item() == pytest.approx(loss1_i.item())

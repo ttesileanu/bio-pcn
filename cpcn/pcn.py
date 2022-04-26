@@ -252,7 +252,7 @@ class PCNetwork(object):
             # noinspection PyUnresolvedReferences
             loss += ((x - x_pred) ** 2).sum(dim=-1) / self.variances[i]
 
-        if self.whitening:
+        if not ignore_whitening and self.whitening:
             batch_outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
             for i in range(len(self.dims) - 1):
                 z = self.z[i + 1]
