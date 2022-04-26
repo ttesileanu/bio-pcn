@@ -647,14 +647,14 @@ def test_loss_reduction_mean(net, data):
 
 
 @pytest.fixture
-def net_whitening():
+def net_constraint():
     torch.manual_seed(20392)
-    net = PCNetwork([3, 4, 5, 2], whitening=True, rho=[0.2, 1.5, 0.7])
+    net = PCNetwork([3, 4, 5, 2], constrained=True, rho=[0.2, 1.5, 0.7])
     return net
 
 
-def test_q_gradient_with_whitening(net_whitening, data):
-    net = net_whitening
+def test_q_gradient_with_constraint(net_constraint, data):
+    net = net_constraint
     net.relax(data.x, data.y)
     net.calculate_weight_grad()
 
@@ -669,10 +669,10 @@ def test_q_gradient_with_whitening(net_whitening, data):
 
 
 @pytest.mark.parametrize("red", ["sum", "mean"])
-def test_calculate_weight_grad_matches_backward_on_loss_whitening(
-    net_whitening, red, data
+def test_calculate_weight_grad_matches_backward_on_loss_constraint(
+    net_constraint, red, data
 ):
-    net = net_whitening
+    net = net_constraint
     net.relax(data.x, data.y)
     net.calculate_weight_grad(reduction=red)
 
@@ -691,29 +691,29 @@ def test_calculate_weight_grad_matches_backward_on_loss_whitening(
         assert torch.allclose(old, new_param.grad)
 
 
-def test_loss_ignore_whitening_works(data):
+def test_loss_ignore_constraint_works(data):
     torch.manual_seed(20392)
-    net1 = PCNetwork([3, 4, 5, 2], whitening=True, rho=[0.2, 1.5, 0.7])
+    net1 = PCNetwork([3, 4, 5, 2], constrained=True, rho=[0.2, 1.5, 0.7])
     net1.relax(data.x, data.y)
-    loss1 = net1.loss(ignore_whitening=True)
+    loss1 = net1.loss(ignore_constraint=True)
 
     torch.manual_seed(20392)
-    net2 = PCNetwork([3, 4, 5, 2], whitening=True, rho=[0.2, 1.5, 0.7])
+    net2 = PCNetwork([3, 4, 5, 2], constrained=True, rho=[0.2, 1.5, 0.7])
     net2.relax(data.x, data.y)
-    net2.whitening = False
+    net2.constrained = False
     loss2 = net2.loss()
 
     assert loss1.item() == pytest.approx(loss2.item())
 
 
-def test_pc_loss_ignores_whitening_by_default(net_whitening, data):
-    net_whitening.relax(data.x, data.y)
-    loss1 = net_whitening.loss()
-    loss1_i = net_whitening.loss(ignore_whitening=True)
+def test_pc_loss_ignores_constraint_by_default(net_constraint, data):
+    net_constraint.relax(data.x, data.y)
+    loss1 = net_constraint.loss()
+    loss1_i = net_constraint.loss(ignore_constraint=True)
 
     assert loss1.item() != pytest.approx(loss1_i.item())
 
-    loss2 = net_whitening.pc_loss()
+    loss2 = net_constraint.pc_loss()
     assert loss2.item() == pytest.approx(loss1_i.item())
 
 
@@ -760,8 +760,8 @@ def test_z_dynamics(net_ntv):
         assert torch.allclose(expected, grad_z[i - 1])
 
 
-def test_z_dynamics_uses_correct_sign_for_whitening(net_whitening):
-    net = net_whitening
+def test_z_dynamics_uses_correct_sign_for_constraint(net_constraint):
+    net = net_constraint
     activation = torch.tanh
     variances = [1.5, 0.3, 2.5]
     for i in range(len(net.activation)):

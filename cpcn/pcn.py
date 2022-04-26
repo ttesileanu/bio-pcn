@@ -19,7 +19,7 @@ class PCNetwork(object):
         it_inference: int = 100,
         lr_inference: float = 0.2,
         variances: Union[Sequence, float] = 1.0,
-        whitening: bool = False,
+        constrained: bool = False,
         rho: Union[Sequence, float] = 0.0,
         bias: bool = True,
         fast_optimizer: Callable = torch.optim.Adam,
@@ -31,9 +31,9 @@ class PCNetwork(object):
         :param it_inference: number of iterations per inference step
         :param lr_inference: learning rate for inference step
         :param variances: variance(s) to use for each layer after the first
-        :param whitening: if true, use a whitening *in*equality,
+        :param constrained: if true, use an inequality constraint,
             cov_matrix(z) <= rho * identity_matrix
-        :param rho: parameter(s) for the whitening inequality
+        :param rho: parameter(s) for the constraint
         :param bias: whether to include a bias term
         :param fast_optimizer: constructor for the optimizer used for the fast dynamics
             in `relax`
@@ -59,7 +59,7 @@ class PCNetwork(object):
         self.rho = torch.from_numpy(
             np.copy(rho) if np.size(rho) > 1 else np.repeat(rho, len(self.dims) - 1)
         )
-        self.whitening = whitening
+        self.constrained = constrained
         self.bias = bias
         self.fast_optimizer = fast_optimizer
 
@@ -82,7 +82,7 @@ class PCNetwork(object):
             nn.init.xavier_uniform_(W)
             W.requires_grad = True
 
-        if self.whitening:
+        if self.constrained:
             self.Q = [
                 torch.Tensor(self.dims[i + 1], self.dims[i + 1])
                 for i in range(len(self.dims) - 1)
@@ -225,16 +225,16 @@ class PCNetwork(object):
         return ns
 
     def loss(
-        self, reduction: str = "mean", ignore_whitening: bool = False
+        self, reduction: str = "mean", ignore_constraint: bool = False
     ) -> torch.Tensor:
         """ Calculate the loss given the current values of the random variables.
         
         :param reduction: reduction to apply to the output: `"none" | "mean" | "sum"`
-        :param ignore_whitening: if true, a whitening term is not included even if
-            `self.whitening` is true; this does nothing if `self.whitening` is false;
-            note also that the constraint term should vanish when the whitening
-            inequality is satisfied, so this parameter should not make a big difference
-            after training has converged
+        :param ignore_constraint: if true, the constraint term is not included even if
+            `self.constrained` is true; it does nothing if `self.constrained` is false;
+            note also that the constraint term should vanish when the inequality is
+            satisfied, so this parameter should not make a significant difference after
+            training has converged
         """
         x = self.z[0]
 
@@ -252,7 +252,7 @@ class PCNetwork(object):
             # noinspection PyUnresolvedReferences
             loss += ((x - x_pred) ** 2).sum(dim=-1) / self.variances[i]
 
-        if not ignore_whitening and self.whitening:
+        if not ignore_constraint and self.constrained:
             batch_outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
             for i in range(len(self.dims) - 1):
                 fz = self.activation[i](self.z[i + 1])
@@ -272,18 +272,18 @@ class PCNetwork(object):
         return loss
 
     def pc_loss(self) -> torch.Tensor:
-        """ An alias of `self.loss()` with `ignore_whitening` set to true. This is
+        """ An alias of `self.loss()` with `ignore_constraint` set to true. This is
         mostly useful for consistency with CPCN classes.
         """
-        return self.loss(ignore_whitening=True)
+        return self.loss(ignore_constraint=True)
 
     def calculate_weight_grad(self, reduction: str = "mean"):
         """Calculate gradients for slow (weight) variables.
 
         This is equivalent to using `backward()` on the output from `self.loss()`
         (after zeroing all the gradients) *and flipping the sign for the gradient of
-        the `Q` parameters* (if `self.whitening` is true). The latter is because the
-        optimizing needs to maximize over `Q` while minimizing over all the other
+        the `Q` parameters* (if `self.constrained` is true). The latter is because the
+        optimization needs to maximize over `Q` while minimizing over all the other
         paramters.
 
         :param reduction: reduction to apply to the gradients: `"mean" | "sum"`
@@ -294,8 +294,8 @@ class PCNetwork(object):
         loss = self.loss(reduction=reduction)
         loss.backward()
 
-        # need to flip the sign of the whitening Lagrange multipliers, if any
-        if self.whitening:
+        # need to flip the sign of the Lagrange multipliers, if any
+        if self.constrained:
             for Q in self.Q:
                 Q.grad = -Q.grad
 
@@ -318,7 +318,7 @@ class PCNetwork(object):
             for i in range(len(self.z)):
                 self.z[i] = self.z[i].to(*args, **kwargs)
 
-            if self.whitening:
+            if self.constrained:
                 for i in range(len(self.Q)):
                     self.Q[i] = self.Q[i].to(*args, **kwargs).requires_grad_()
 
@@ -333,7 +333,7 @@ class PCNetwork(object):
 
         if self.bias:
             params.extend(self.b)
-        if self.whitening:
+        if self.constrained:
             params.extend(self.Q)
 
         return params
