@@ -658,6 +658,8 @@ class Trainer:
         """
         storage = {}
         for var in vars:
+            layered = False
+            crt_size = size
             if size == 0:
                 if "." not in var:
                     value = getattr(self.net, var)
@@ -666,13 +668,16 @@ class Trainer:
                         raise ValueError(f"can't parse variable name, {var}")
                     value = hierarchical_get(self, var)
                 if isinstance(value, (list, tuple)):
-                    size = len(value)
+                    crt_size = len(value)
+                    layered = True
                 else:
-                    size = 1
+                    crt_size = 1
+            elif size > 1:
+                layered = True
 
-            if size > 1:
+            if layered:
                 # this is a multi-layer variable
-                for k in range(size):
+                for k in range(crt_size):
                     storage[var + ":" + str(k)] = None
             else:
                 storage[var] = None
