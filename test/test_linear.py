@@ -1034,3 +1034,17 @@ def test_q_gradient_with_nontrivial_constraint_vs_autograd(net_nontrivial_constr
 
     for from_manual, from_loss in zip(manual_grads, loss_grads):
         assert torch.allclose(from_manual, from_loss)
+
+
+def test_constraint_scaling(net, data):
+    net.relax(data.x, data.y)
+    net.calculate_weight_grad()
+
+    old_grad = [_.grad.detach().clone() for _ in net.Q]
+
+    tau = 0.75
+    net.tau[:] = tau
+    net.calculate_weight_grad()
+
+    for old, new_Q in zip(old_grad, net.Q):
+        assert torch.allclose(old / tau, new_Q.grad)
