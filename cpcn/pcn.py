@@ -350,7 +350,8 @@ class PCNetwork(object):
             f"PCNetwork("
             f"dims={str(self.dims)}, "
             f"activation={str(self.activation)}, "
-            f"bias={str(self.bias)}"
+            f"bias={str(self.bias)}, "
+            f"constrained={self.constrained}"
             f")"
         )
         return s
@@ -361,6 +362,7 @@ class PCNetwork(object):
             f"dims={repr(self.dims)}, "
             f"activation={repr(self.activation)}, "
             f"bias={str(self.bias)}, "
+            f"constrained={self.constrained}, "
             f"it_inference={self.it_inference}, "
             f"lr_inference={self.lr_inference}, "
             f"variances={self.variances}"
