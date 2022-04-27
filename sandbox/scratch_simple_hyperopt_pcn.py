@@ -1,6 +1,7 @@
 # %% [markdown]
 # # A simple test of using `optuna` for hyperparameter optimization
 
+import os
 import time
 from types import SimpleNamespace
 
@@ -31,7 +32,16 @@ def create_pcn(trial):
     dims = [28 * 28, 5, 10]
 
     z_lr = trial.suggest_float("z_lr", 1e-5, 0.2, log=True)
-    net = PCNetwork(dims, lr_inference=z_lr, it_inference=50, variances=1, bias=False)
+    rho = 0.015
+    net = PCNetwork(
+        dims,
+        lr_inference=z_lr,
+        it_inference=50,
+        variances=1,
+        bias=False,
+        constrained=True,
+        rho=rho,
+    )
 
     return net
 
@@ -45,7 +55,7 @@ def objective(
     n_rep: int,
 ) -> float:
     scores = torch.zeros(n_rep)
-    for i in range(n_rep):
+    for i in tqdm(range(n_rep)):
         torch.manual_seed(seed + i)
 
         net = create_pcn(trial).to(device)
@@ -55,15 +65,15 @@ def objective(
         optimizer_class = torch.optim.Adam
         lr = trial.suggest_float("lr", 1e-5, 1e-1, log=True)
 
-        rep_gamma = trial.suggest_float("rep_gamma", 1e-7, 0.2, log=True)
+        # rep_gamma = trial.suggest_float("rep_gamma", 1e-7, 0.2, log=True)
 
         trainer = Trainer(net, dataset["train"], dataset["validation"])
         trainer.set_optimizer(optimizer_class, lr=lr)
-        trainer.add_scheduler(
-            lambda optim: torch.optim.lr_scheduler.ExponentialLR(
-                optim, gamma=1 - rep_gamma
-            )
-        )
+        # trainer.add_scheduler(
+        #     lambda optim: torch.optim.lr_scheduler.ExponentialLR(
+        #         optim, gamma=1 - rep_gamma
+        #     )
+        # )
 
         # trainer.add_epoch_observer(lambda ns: optuna_reporter(trial, ns))
         results = trainer.run(n_epochs)
@@ -116,5 +126,5 @@ optuna.visualization.matplotlib.plot_param_importances(study)
 
 # %%
 
-with open("hyperopt_pcn.pkl", "wb") as f:
+with open(os.path.join("save", "hyperopt_pcn.pkl"), "wb") as f:
     pickle.dump(study, f)

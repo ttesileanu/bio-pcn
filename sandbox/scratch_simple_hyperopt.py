@@ -1,6 +1,7 @@
 # %% [markdown]
 # # A simple test of using `optuna` for hyperparameter optimization
 
+import os
 import time
 from types import SimpleNamespace
 
@@ -30,6 +31,8 @@ def optuna_reporter(trial: optuna.trial.Trial, ns: SimpleNamespace):
 def create_biopcn(trial):
     dims = [28 * 28, 5, 10]
 
+    rho = 0.015
+
     z_lr = trial.suggest_float("z_lr", 0.01, 0.4, log=True)
     # z_lr = 0.1
 
@@ -48,6 +51,7 @@ def create_biopcn(trial):
         g_b=g_b,
         c_m=0,
         l_s=g_b,
+        rho=rho,
         bias_a=False,
         bias_b=False,
     )
@@ -133,7 +137,7 @@ optuna.visualization.matplotlib.plot_param_importances(study)
 
 # %%
 
-with open("hyperopt_biopcn.pkl", "wb") as f:
+with open(os.path.join("save", "hyperopt_biopcn.pkl"), "wb") as f:
     pickle.dump(study, f)
 
 # %%
