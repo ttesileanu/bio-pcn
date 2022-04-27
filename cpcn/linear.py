@@ -252,7 +252,7 @@ class LinearBioPCN:
                 post = self.z[i + 2] - self.h_a[i]
             else:
                 post = self.z[i + 2]
-            grad = self.g_a[i] * (self.W_a[i] - batch_outer(post, pre))
+            grad = self.g_a[i] * (self.rho[i] * self.W_a[i] - batch_outer(post, pre))
             if grad.ndim == self.W_a[i].ndim + 1:
                 # this is a batch evaluation!
                 grad = red_fct(grad, 0)

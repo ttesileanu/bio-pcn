@@ -622,7 +622,7 @@ def linear_cpcn_loss(net: LinearBioPCN, reduction: str = "sum") -> torch.Tensor:
 
         diff = net.z[i + 2] - net.h_a[i]
         cross_term = (diff * (z @ net.W_a[i].T)).sum(dim=-1)
-        wa_reg = torch.trace(net.W_a[i] @ net.W_a[i].T)
+        wa_reg = net.rho[i] * torch.trace(net.W_a[i] @ net.W_a[i].T)
         apical0 = (diff ** 2).sum(dim=-1) - 2 * cross_term + wa_reg
         apical = 0.5 * net.g_a[i] * apical0
 
@@ -1048,3 +1048,42 @@ def test_constraint_scaling(net, data):
 
     for old, new_Q in zip(old_grad, net.Q):
         assert torch.allclose(old / tau, new_Q.grad)
+
+
+def test_wa_gradient_with_nontrivial_constraint(net_nontrivial_constraint, data):
+    net = net_nontrivial_constraint
+    net.relax(data.x, data.y)
+    net.calculate_weight_grad()
+
+    outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
+    for i in range(len(net.inter_dims)):
+        diff = net.z[i + 2] - net.h_a[i]
+        expected = net.g_a[i] * (
+            net.rho[i] * net.W_a[i] - outer(diff, net.z[i + 1])
+        ).mean(dim=0)
+        assert torch.allclose(net.W_a[i].grad, expected)
+
+
+def test_wa_gradient_with_nontrivial_constraint_vs_autograd(net_nontrivial_constraint):
+    net = net_nontrivial_constraint
+
+    x = torch.FloatTensor([-0.1, 0.2, 0.4])
+    y = torch.FloatTensor([0.3, -0.4])
+    net.relax(x, y)
+    net.calculate_weight_grad()
+
+    manual_grads = [_.grad.clone().detach() for _ in net.W_a]
+
+    for param in net.slow_parameters():
+        param.requires_grad_()
+        if param.grad is not None:
+            param.grad.detach_()
+            param.grad.zero_()
+
+    loss = linear_cpcn_loss(net)
+    loss.backward()
+
+    loss_grads = [_.grad.clone().detach() for _ in net.W_a]
+
+    for from_manual, from_loss in zip(manual_grads, loss_grads):
+        assert torch.allclose(from_manual, from_loss)
