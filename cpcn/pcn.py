@@ -85,7 +85,7 @@ class PCNetwork(object):
         if self.constrained:
             self.Q = [
                 torch.Tensor(self.dims[i + 1], self.dims[i + 1])
-                for i in range(len(self.dims) - 1)
+                for i in range(len(self.dims) - 2)
             ]
             for Q in self.Q:
                 nn.init.xavier_uniform_(Q)
@@ -243,6 +243,15 @@ class PCNetwork(object):
 
         for i in range(len(self.dims) - 1):
             x_pred = self.activation[i](x)
+
+            if i > 0 and not ignore_constraint and self.constrained:
+                Q = self.Q[i - 1]
+                qz = x_pred @ Q.T
+                cons_z = (qz ** 2).sum(dim=-1)
+                cons_q = self.rho[i - 1] * (Q ** 2).sum()
+                constraint0 = cons_z - cons_q
+                loss += constraint0 / self.variances[i - 1]
+
             if self.bias:
                 x_pred = x_pred @ self.W[i].T + self.b[i]
             else:
@@ -251,15 +260,6 @@ class PCNetwork(object):
             x = self.z[i + 1]
             # noinspection PyUnresolvedReferences
             loss += ((x - x_pred) ** 2).sum(dim=-1) / self.variances[i]
-
-        if not ignore_constraint and self.constrained:
-            batch_outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
-            for i in range(len(self.dims) - 1):
-                fz = self.activation[i](self.z[i + 1])
-                cons = batch_outer(fz, fz) - self.rho[i] * torch.eye(fz.shape[-1])
-                q_prod = self.Q[i].T @ self.Q[i]
-                constraint0 = (q_prod @ cons).diagonal(dim1=-1, dim2=-2).sum(dim=-1)
-                loss += constraint0 / self.variances[i]
 
         if reduction == "sum":
             loss = loss.sum()

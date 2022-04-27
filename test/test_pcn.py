@@ -659,7 +659,7 @@ def test_q_gradient_with_constraint(net_constraint, data):
     net.calculate_weight_grad()
 
     outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
-    for i in range(len(net.dims) - 1):
+    for i in range(len(net.dims) - 2):
         fz = net.activation[i](net.z[i + 1])
         n = fz @ net.Q[i].T
         expected = (1 / net.variances[i]) * (net.rho[i] * net.Q[i] - outer(n, fz)).mean(
