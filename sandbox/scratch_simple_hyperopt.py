@@ -68,7 +68,7 @@ def objective(
     n_rep: int,
 ) -> float:
     scores = torch.zeros(n_rep)
-    for i in range(n_rep):
+    for i in tqdm(range(n_rep)):
         torch.manual_seed(seed + i)
         net = create_biopcn(trial).to(device)
 
@@ -99,9 +99,9 @@ t0 = time.time()
 
 device = torch.device("cpu")
 
-n_epochs = 30
+n_epochs = 200
 seed = 1927
-n_rep = 8
+n_rep = 5
 
 dataset = load_mnist(n_train=2000, n_validation=500, batch_size=100)
 
@@ -110,8 +110,8 @@ sampler = optuna.samplers.TPESampler(seed=seed)
 study = optuna.create_study(direction="minimize", sampler=sampler)
 study.optimize(
     lambda trial: objective(trial, n_epochs, dataset, device, seed, n_rep),
-    n_trials=50,
-    timeout=8000,
+    n_trials=40,
+    timeout=24000,
     show_progress_bar=True,
 )
 

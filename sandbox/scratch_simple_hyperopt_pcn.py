@@ -31,7 +31,7 @@ def optuna_reporter(trial: optuna.trial.Trial, ns: SimpleNamespace):
 def create_pcn(trial):
     dims = [28 * 28, 5, 10]
 
-    z_lr = trial.suggest_float("z_lr", 1e-5, 0.2, log=True)
+    z_lr = trial.suggest_float("z_lr", 0.01, 0.4, log=True)
     rho = 0.015
     net = PCNetwork(
         dims,
@@ -63,7 +63,7 @@ def objective(
         # optimizer_type = trial.suggest_categorical("optimizer", ["Adam", "RMSprop", "SGD"])
         # optimizer_class = getattr(torch.optim, optimizer_type)
         optimizer_class = torch.optim.Adam
-        lr = trial.suggest_float("lr", 1e-5, 1e-1, log=True)
+        lr = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
 
         # rep_gamma = trial.suggest_float("rep_gamma", 1e-7, 0.2, log=True)
 
@@ -89,9 +89,9 @@ t0 = time.time()
 
 device = torch.device("cpu")
 
-n_epochs = 30
+n_epochs = 200
 seed = 1927
-n_rep = 8
+n_rep = 5
 
 dataset = load_mnist(n_train=2000, n_validation=500, batch_size=100)
 
@@ -99,8 +99,8 @@ sampler = optuna.samplers.TPESampler(seed=seed)
 study = optuna.create_study(direction="minimize", sampler=sampler)
 study.optimize(
     lambda trial: objective(trial, n_epochs, dataset, device, seed, n_rep),
-    n_trials=50,
-    timeout=8000,
+    n_trials=40,
+    timeout=24000,
     show_progress_bar=True,
 )
 
