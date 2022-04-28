@@ -2,6 +2,7 @@
 # # Plots for linear network with 1 hidden layer
 
 # %%
+import os
 import pydove as dv
 
 import numpy as np
@@ -18,8 +19,8 @@ from cpcn import LinearBioPCN, PCNetwork, load_mnist, Trainer
 # ## Setup
 
 seed = 32890
-n_epochs = 20
-n_reps = 10
+n_epochs = 15
+n_reps = 8
 dims = [784, 5, 10]
 
 device = torch.device("cpu")
@@ -33,10 +34,10 @@ dataset = load_mnist(n_validation=10000, device=device)
 # %% [markdown]
 # ## Load optimal parameters
 
-with open("hyperopt_pcn.pkl", "rb") as f:
+with open(os.path.join("save", "hyperopt_pcn.pkl"), "rb") as f:
     study_pcn = pickle.load(f)
     best_pcn = study_pcn.best_params
-with open("hyperopt_cpcn.pkl", "rb") as f:
+with open(os.path.join("save", "hyperopt_biopcn.pkl"), "rb") as f:
     study_cpcn = pickle.load(f)
     best_cpcn = study_cpcn.best_params
 
@@ -53,6 +54,9 @@ g_a[-1] *= 2
 g_b = 0.5 * np.ones(len(dims) - 2)
 g_b[0] *= 2
 
+rho = 0.015
+z_it = 80
+
 for i in tqdm(range(n_reps), desc="repetitions"):
     # train PCN
     torch.manual_seed(seed + i)
@@ -61,8 +65,10 @@ for i in tqdm(range(n_reps), desc="repetitions"):
         dims,
         activation=lambda _: _,
         lr_inference=best_pcn["z_lr"],
-        it_inference=50,
+        it_inference=z_it,
         variances=1.0,
+        constrained=True,
+        rho=rho,
         bias=False,
     ).to(device)
 
@@ -80,11 +86,12 @@ for i in tqdm(range(n_reps), desc="repetitions"):
     cpcn = LinearBioPCN(
         dims,
         z_lr=best_cpcn["z_lr"],
-        z_it=50,
+        z_it=z_it,
         g_a=g_a,
         g_b=g_b,
         c_m=0,
         l_s=g_b,
+        rho=rho,
         bias_a=False,
         bias_b=False,
     ).to(device)
@@ -116,18 +123,32 @@ with open("linear_1hidden_results.pkl", "wb") as f:
 # ## Plot results
 
 with dv.FigureManager() as (_, ax):
+    last_val_max = 0
+    last_val_min = np.inf
     for crt_pcn in pcn_results:
         ax.plot(crt_pcn["output"].validation["pc_loss"], c="C0", alpha=0.5, lw=0.5)
+        last_val_max = max(last_val_max, crt_pcn["output"].validation["pc_loss"][-1])
+        last_val_min = min(last_val_min, crt_pcn["output"].validation["pc_loss"][-1])
 
     for crt_cpcn in cpcn_results:
         ax.plot(crt_cpcn["output"].validation["pc_loss"], c="C1", alpha=0.5, lw=0.5)
+        last_val_max = max(last_val_max, crt_cpcn["output"].validation["pc_loss"][-1])
+        last_val_min = min(last_val_min, crt_cpcn["output"].validation["pc_loss"][-1])
 
     ax.plot([], c="C0", lw=0.5, label="Whittington&Bogacz")
     ax.plot([], c="C1", lw=0.5, label="BioPCN")
 
     ax.legend(frameon=False)
+    ax.set_xlabel("epoch")
+    ax.set_ylabel("predictive-coding loss")
 
-    ax.set_ylim(None, 0.4)
+    last_val_center = 0.5 * (last_val_min + last_val_max)
+    last_val_range = 0.5 * (last_val_max - last_val_min)
+    ax.set_ylim(
+        last_val_center - 3 * last_val_range, last_val_center + 3 * last_val_range
+    )
+
+    # ax.set_ylim(None, 0.4)
 
 # %%
 
@@ -160,6 +181,17 @@ with dv.FigureManager() as (_, ax):
             lw=0.5,
         )
 
-    ax.set_ylim(None, 0.4)
+    ax.plot([], c="C0", lw=0.5, label="Whittington&Bogacz")
+    ax.plot([], c="C1", lw=0.5, label="BioPCN")
+    ax.legend(frameon=False)
+
+    ax.set_xlabel("epoch")
+    ax.set_ylabel("predictive-coding loss")
+
+    ax.set_ylim(
+        last_val_center - 3 * last_val_range, last_val_center + 3 * last_val_range
+    )
+
+    # ax.set_ylim(None, 0.4)
 
 # %%
