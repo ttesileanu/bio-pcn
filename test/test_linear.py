@@ -1087,3 +1087,20 @@ def test_wa_gradient_with_nontrivial_constraint_vs_autograd(net_nontrivial_const
 
     for from_manual, from_loss in zip(manual_grads, loss_grads):
         assert torch.allclose(from_manual, from_loss)
+
+
+@pytest.mark.parametrize("var", ["W_a", "W_b", "Q", "M"])
+def test_init_scale(var):
+    scale_name = var.lower().replace("_", "") + "0_scale"
+
+    seed = 1
+    scale = 1.35
+    dims = [5, 3, 4, 3]
+    torch.manual_seed(seed)
+    net1 = LinearBioPCN(dims)
+
+    torch.manual_seed(seed)
+    net2 = LinearBioPCN(dims, **{scale_name: scale})
+
+    for theta1, theta2 in zip(getattr(net1, var), getattr(net2, var)):
+        assert torch.allclose(theta2, scale * theta1)

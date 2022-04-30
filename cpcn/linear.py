@@ -27,6 +27,10 @@ class LinearBioPCN:
         bias_a: bool = True,
         bias_b: bool = True,
         fast_optimizer: Callable = torch.optim.Adam,
+        wa0_scale: Union[Sequence, float] = 1.0,
+        wb0_scale: Union[Sequence, float] = 1.0,
+        q0_scale: Union[Sequence, float] = 1.0,
+        m0_scale: Union[Sequence, float] = 1.0,
     ):
         """Initialize the network.
 
@@ -47,6 +51,10 @@ class LinearBioPCN:
         :param bias_b: whether to have bias terms at the basal end
         :param fast_optimizer: constructor for the optimizer used for the fast dynamics
             in `relax`
+        :param wa0_scale: scale(s) for the (random) initial values of W_a
+        :param wb0_scale: scale(s) for the (random) initial values of W_b
+        :param q0_scale: scale(s) for the (random) initial values of Q
+        :param m0_scale: scale(s) for the (random) initial values of M
         """
         self.training = True
 
@@ -68,6 +76,11 @@ class LinearBioPCN:
         self.c_m = self._expand_per_layer(c_m)
         self.rho = self._expand_per_layer(rho)
         self.tau = self._expand_per_layer(tau)
+
+        wa0_scale = self._expand_per_layer(wa0_scale)
+        wb0_scale = self._expand_per_layer(wb0_scale)
+        q0_scale = self._expand_per_layer(q0_scale)
+        m0_scale = self._expand_per_layer(m0_scale)
 
         self.bias_a = bias_a
         self.bias_b = bias_b
@@ -97,8 +110,8 @@ class LinearBioPCN:
             self.M.append(torch.Tensor(self.pyr_dims[i + 1], self.pyr_dims[i + 1]))
 
         # initialize weights and biases
-        self._initialize_interlayer_weights()
-        self._initialize_intralayer_weights()
+        self._initialize_interlayer_weights(wa0_scale, wb0_scale)
+        self._initialize_intralayer_weights(q0_scale, m0_scale)
         self._initialize_biases()
 
         # create neural variables
@@ -455,17 +468,25 @@ class LinearBioPCN:
         """ Set in evaluation mode. """
         self.training = False
 
-    def _initialize_interlayer_weights(self):
-        for lst in [self.W_a, self.W_b]:
-            for W in lst:
-                nn.init.xavier_uniform_(W)
-                W.requires_grad = True
+    def _initialize_interlayer_weights(
+        self, wa0_scale: torch.Tensor, wb0_scale: torch.Tensor
+    ):
+        for W, scale in zip(self.W_a, wa0_scale):
+            nn.init.xavier_uniform_(W, gain=scale)
+            W.requires_grad = True
+        for W, scale in zip(self.W_b, wb0_scale):
+            nn.init.xavier_uniform_(W, gain=scale)
+            W.requires_grad = True
 
-    def _initialize_intralayer_weights(self):
-        for lst in [self.Q, self.M]:
-            for W in lst:
-                nn.init.xavier_uniform_(W)
-                W.requires_grad = True
+    def _initialize_intralayer_weights(
+        self, q0_scale: torch.Tensor, m0_scale: torch.Tensor
+    ):
+        for Q, scale in zip(self.Q, q0_scale):
+            nn.init.xavier_uniform_(Q, gain=scale)
+            Q.requires_grad = True
+        for M, scale in zip(self.M, m0_scale):
+            nn.init.xavier_uniform_(M, gain=scale)
+            M.requires_grad = True
 
     def _initialize_biases(self):
         all = []
