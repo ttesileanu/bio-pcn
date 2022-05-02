@@ -32,13 +32,13 @@ class Trainer:
     :param classifier_criterion: objective fucntion for training classifier; default:
         `MSELoss()`
     :param classifier_dim: which layer of `net` to pass into the classifier
-    :param epoch_observers: list of tuples `(observer, condition)`; see
-        `add_epoch_observer()`
-    :param batch_observers: list of tuples `(observer, condition, profile)`; see
-        `add_batch_observer()`
+    :param observers: list of tuples `(observer, condition)`; see `add_observer()`
+    :param validation_condition: callable identifying batches where a validation run is
+        performed
     :param history: namespace of history data for the last call to `run()`; see the
         `peek...` functions
-    :param schedulers: list of learning-rate scheduler constructors
+    :param schedulers: list of tuples `(scheduler, condition)` of learning-rate
+        scheduler constructors and the conditions under which they should be called
     """
 
     def __init__(self, net, train_loader: Iterable, validation_loader: Iterable):
@@ -63,33 +63,132 @@ class Trainer:
         self.classifier_criterion = None
         self.classifier_dim = -2
 
-        self.epoch_observers = []
-        self.batch_observers = []
+        self.observers = []
         self.schedulers = []
+        self.validation_condition = None  # see call to `peek_validation` below
+
+        # these will be set by `run`
+        self._last_val = None
+        self._n_batches = None
+        self._optimizer = None
 
         # set up the history with storage for tracking the loss and accuracy
+        # (and learning rate)
         self.history = SimpleNamespace()
-        self._setup_history("train", ["pc_loss", "accuracy"], "epoch", size=1)
-        self._setup_history("validation", ["pc_loss", "accuracy"], "epoch", size=1)
+        self._setup_history("all_train", ["pc_loss", "accuracy", "lr"], "batch", size=1)
+        self._setup_history("train", ["pc_loss", "accuracy"], "batch", size=1)
+        self._setup_history("validation", ["pc_loss", "accuracy"], "batch", size=1)
 
-        self._setup_history("batch_train", ["pc_loss", "accuracy"], "batch", size=1)
-        self._setup_history(
-            "batch_validation", ["pc_loss", "accuracy"], "batch", size=1
-        )
+        # by default: run on validation test once per epoch
+        self.peek_validation(every=len(self.train_loader))
 
     def run(
-        self, n_epochs: int, progress: Optional[Callable] = None
+        self,
+        n_epochs: Optional[int] = None,
+        n_batches: Optional[int] = None,
+        progress: Optional[Callable] = None,
     ) -> SimpleNamespace:
         """Run the training.
         
-        :param n_epochs: number of training epochs
+        :param n_epochs: number of training epochs; either this or `n_batches` must be
+            given
+        :param n_batches: number of training batches; if larger than the number of
+            batches in the dataset, a new epoch is started; if `n_batches` is provided,
+            it overrides `n_epochs`
         :param progress: progress indicator; should have `tqdm` interface
         :return: `self.history`, which contains outputs from any monitors registered
             with the `self.peek...` functions, as well as the progress of the predictive
-            coding loss (`"pc_loss"`) and `"accuracy"` per-epoch (in `train` and
-            `validation`) and per-batch (in `batch_train` and `batch_validation`)
+            coding loss (`"pc_loss"`) and `"accuracy"` for every training batch (in
+            `all_train`) and for every validation checkpoint (in `validation`); the
+            average training-set `"pc_loss"` and `"accuracy"` calculated between every
+            pair of validation checkpoints is included in `train`; `all_train` also
+            keeps track of the learning rate, in `"lr"`
         """
-        # set up optimizer for main net and classifier (if any)
+        # initialization work
+        optimizer, classifier_optim = self._setup_optimizers()
+        self._optimizer = optimizer
+
+        self.net.train()
+        if self.classifier:
+            self.classifier.train()
+
+        self._reset_history()
+
+        # construct learning-rate schedulers
+        schedulers = []
+        for constructor, condition in self.schedulers:
+            schedulers.append((constructor(optimizer), condition))
+
+        # set up progress bar, if any
+        if n_batches is None:
+            n_train = len(self.train_loader)
+            n_batches = n_epochs * n_train
+        if progress is not None:
+            pbar = progress(total=n_batches)
+        else:
+            pbar = None
+
+        # run the training
+        it = iter(self.train_loader)
+        self._n_batches = n_batches
+        self._last_val = 0
+        epoch = 0
+        for batch in range(n_batches):
+            # get next batch, restarting the training-set iteration if needed
+            try:
+                x, y = next(it)
+            except StopIteration:
+                # start over
+                it = iter(self.train_loader)
+                x, y = next(it)
+                epoch += 1
+
+            # train main net, asking for loss+latent profile if needed for obsevers
+            observers, need_profile = self._get_observers(batch)
+            batch_results = self.net.relax(
+                x, y, pc_loss_profile=need_profile, latent_profile=need_profile
+            )
+            pc_loss = self.net.pc_loss().item()
+            self.net.calculate_weight_grad()
+            optimizer.step()
+
+            # use and train classifier, if we have one
+            y_pred = self._get_and_train_prediction(x, y, classifier_optim)
+
+            # keep track of per-batch indicators
+            accuracy = self.accuracy_fct(y_pred, y)
+
+            # call any batch observers; this also stores training-mode diagnostics
+            self._report(observers, epoch, batch, pc_loss, accuracy, batch_results)
+            if self.validation_condition(batch):
+                # this fills out the `validation` and `train` fields of history
+                self._validation_run(epoch, batch)
+
+            # run learning-rate schedulers
+            for scheduler, condition in schedulers:
+                if condition(batch):
+                    scheduler.step()
+
+            # update progress bar, if any
+            if pbar is not None:
+                pbar.update()
+                progress_info = self._pbar_report(epoch, batch)
+                pbar.set_postfix(progress_info, refresh=False)
+
+            batch += 1
+
+        # convert all history information to tensors
+        self._coalesce_history()
+
+        if pbar is not None:
+            pbar.close()
+
+        return self.history
+
+    def _setup_optimizers(
+        self,
+    ) -> Tuple[torch.optim.Optimizer, Optional[torch.optim.Optimizer]]:
+        """Set up optimizers for the main network and for the classifier, if any."""
         optimizer = self.optimizer_class(
             self.net.slow_parameters(), **self.optimizer_kwargs
         )
@@ -101,112 +200,46 @@ class Trainer:
                 self.classifier.parameters(), **self.classifier_optim_kwargs
             )
 
-        # set up any learning-rate schedulers
-        schedulers = []
-        for constructor in self.schedulers:
-            schedulers.append(constructor(optimizer))
+        return optimizer, classifier_optim
 
-        # set up progress bar, if any
-        if progress is not None:
-            epoch_range = progress(range(n_epochs))
-        else:
-            epoch_range = range(n_epochs)
-
-        # run the training
-        self._reset_history()
-        for epoch in epoch_range:
-            self.net.train()
-            if self.classifier:
-                self.classifier.train()
-
-            batch_train_loss = []
-            batch_train_accuracy = []
-            for i, (x, y) in enumerate(self.train_loader):
-                # train main net, asking for loss+latent profile if needed for obsevers
-                observers, need_profile = self._get_observers(epoch, i)
-                batch_results = self.net.relax(
-                    x, y, pc_loss_profile=need_profile, latent_profile=need_profile
-                )
-                pc_loss = self.net.pc_loss().item()
-                self.net.calculate_weight_grad()
-                optimizer.step()
-
-                # use and train classifier, if we have one; but don't overwrite latents!
-                z_fwd = self.net.forward(x, inplace=False)
-                if self.classifier is not None:
-                    y_pred = self.classifier(z_fwd[self.classifier_dim])
-
-                    classifier_optim.zero_grad()
-                    classifier_loss = self.classifier_criterion(y_pred, y)
-                    classifier_loss.backward()
-                    classifier_optim.step()
-                else:
-                    y_pred = z_fwd[-1]
-
-                # keep track of per-batch indicators
-                accuracy = self.accuracy_fct(y_pred, y)
-                batch_train_loss.append(pc_loss)
-                batch_train_accuracy.append(accuracy)
-
-                # call any batch observers; this also stores training-mode diagnostics
-                self._batch_report(
-                    observers, epoch, i, pc_loss, accuracy, batch_results
-                )
-
-            # evaluate performance on validation set
-            self.net.eval()
-            if self.classifier:
-                self.classifier.eval()
-            batch_val_loss, batch_val_accuracy = evaluate(
-                self.net,
-                self.validation_loader,
-                accuracy_fct=self.accuracy_fct,
-                classifier=self.classifier,
-                classifier_dim=self.classifier_dim,
-            )
-
-            # store per-epoch diagnostics for training mode, and per-epoch and per-batch
-            # diagnostics for validation
-            progress_info = self._epoch_report(
-                epoch,
-                batch_train_loss,
-                batch_train_accuracy,
-                batch_val_loss,
-                batch_val_accuracy,
-            )
-
-            # run learning-rate schedulers
-            for scheduler in schedulers:
-                scheduler.step()
-
-            # update progress bar, if any
-            if progress is not None:
-                epoch_range.set_postfix(progress_info)
-
-        # convert all history information to tensors
-        self._coalesce_history()
-
-        return self.history
-
-    def _get_observers(self, epoch: int, i: int) -> Tuple[list, bool]:
-        """Get list of observers that should be called given epoch and batch index, as
-        well as whether there are any that need a loss profile calculation.
+    def _get_observers(self, batch: int) -> Tuple[list, bool]:
+        """Get list of observers that should be called given the batch index. Also find
+        whether any of the observers need a loss profile calculation.
         """
         observers = []
         need_profile = False
-        for observer, condition, profile in self.batch_observers:
-            if condition(epoch, i):
+        for observer, condition, profile in self.observers:
+            if condition(batch):
                 observers.append(observer)
                 if profile:
                     need_profile = True
 
         return observers, need_profile
 
-    def _batch_report(
+    def _get_and_train_prediction(
+        self, x: torch.Tensor, y: torch.Tensor, classifier_optim: Callable
+    ) -> torch.Tensor:
+        """Get prediction, using the classifier (if any), and train the classifier (if
+        any).
+        """
+        z_fwd = self.net.forward(x, inplace=False)
+        if self.classifier is not None:
+            y_pred = self.classifier(z_fwd[self.classifier_dim])
+
+            classifier_optim.zero_grad()
+            classifier_loss = self.classifier_criterion(y_pred, y)
+            classifier_loss.backward()
+            classifier_optim.step()
+        else:
+            y_pred = z_fwd[-1]
+
+        return y_pred
+
+    def _report(
         self,
         observers: list,
         epoch: int,
-        i: int,
+        batch: int,
         pc_loss: float,
         accuracy: float,
         batch_results: SimpleNamespace,
@@ -217,9 +250,10 @@ class Trainer:
         if len(observers) > 0:
             batch_ns = SimpleNamespace(
                 epoch=epoch,
-                batch=i,
+                batch=batch,
                 net=self.net,
                 classifier=self.classifier,
+                trainer=self,
                 train_loss=pc_loss,
                 train_accuracy=accuracy,
             )
@@ -231,72 +265,71 @@ class Trainer:
                 observer(batch_ns)
 
         # keep track of loss and accuracy
-        target_dict = self.history.batch_train
+        target_dict = self.history.all_train
         target_dict["epoch"].append(epoch)
-        target_dict["batch"].append(i)
+        target_dict["batch"].append(batch)
+        target_dict["pc_loss"].append(torch.FloatTensor([pc_loss]))
+        target_dict["accuracy"].append(torch.FloatTensor([accuracy]))
+        lr = self._optimizer.param_groups[0]["lr"]
+        target_dict["lr"].append(torch.FloatTensor([lr]))
+
+    def _validation_run(self, epoch: int, batch: int):
+        # evaluate performance on validation set
+        self.net.eval()
+        if self.classifier:
+            self.classifier.eval()
+        pc_loss, accuracy = evaluate(
+            self.net,
+            self.validation_loader,
+            accuracy_fct=self.accuracy_fct,
+            classifier=self.classifier,
+            classifier_dim=self.classifier_dim,
+        )
+        pc_loss = torch.mean(torch.FloatTensor([pc_loss]))
+        accuracy = torch.mean(torch.FloatTensor([accuracy]))
+
+        target_dict = self.history.validation
+        target_dict["epoch"].append(epoch)
+        target_dict["batch"].append(batch)
         target_dict["pc_loss"].append(torch.FloatTensor([pc_loss]))
         target_dict["accuracy"].append(torch.FloatTensor([accuracy]))
 
-    def _epoch_report(
-        self,
-        epoch,
-        batch_train_loss,
-        batch_train_accuracy,
-        batch_val_loss,
-        batch_val_accuracy,
-    ):
-        """Send information to epoch observers, store training-mode per-epoch
-        diagnostics in `self.history`, and store both per-epoch and per-batch
-        validation-mode diagnostics.
-
-        :return: a dict of progress information for the progress bar
-        """
-        # update training-mode diagnostics
-        epoch_train_loss = np.mean(batch_train_loss)
-        epoch_train_accuracy = np.mean(batch_train_accuracy)
-        epoch_val_loss = np.mean(batch_val_loss)
-        epoch_val_accuracy = np.mean(batch_val_accuracy)
-
+        # fill out average performance on training set
+        all_train = self.history.all_train
+        last_losses = all_train["pc_loss"][self._last_val :]
+        last_accuracies = all_train["accuracy"][self._last_val :]
+        avg_pc_loss = torch.mean(torch.FloatTensor([last_losses]))
+        avg_accuracy = torch.mean(torch.FloatTensor([last_accuracies]))
         target_dict = self.history.train
         target_dict["epoch"].append(epoch)
-        target_dict["pc_loss"].append(torch.FloatTensor([epoch_train_loss]))
-        target_dict["accuracy"].append(torch.FloatTensor([epoch_train_accuracy]))
+        target_dict["batch"].append(batch)
+        target_dict["pc_loss"].append(torch.FloatTensor([avg_pc_loss]))
+        target_dict["accuracy"].append(torch.FloatTensor([avg_accuracy]))
+        self._last_val = len(all_train["pc_loss"])
 
-        # update validation-mode diagnostics
-        target_dict = self.history.validation
-        target_dict["epoch"].append(epoch)
-        target_dict["pc_loss"].append(torch.FloatTensor([epoch_val_loss]))
-        target_dict["accuracy"].append(torch.FloatTensor([epoch_val_accuracy]))
+        # switch back to training mode
+        self.net.train()
+        if self.classifier:
+            self.classifier.train()
 
-        target_dict = self.history.batch_validation
-        target_dict["epoch"].extend(len(batch_val_loss) * [epoch])
-        target_dict["batch"].extend(list(range(len(batch_val_loss))))
-        target_dict["pc_loss"].append(torch.FloatTensor(batch_val_loss))
-        target_dict["accuracy"].append(torch.FloatTensor(batch_val_accuracy))
+    def _pbar_report(self, epoch: int, batch: int) -> dict:
+        """Generate `dict` of progress information for the progress bar."""
+        loss_list = self.history.validation["pc_loss"]
+        if len(loss_list) > 0:
+            val_loss_str = f"{loss_list[-1].item():.2g}"
+        else:
+            val_loss_str = "???"
 
-        # call any epoch observers
-        epoch_ns = SimpleNamespace(
-            epoch=epoch,
-            net=self.net,
-            classifier=self.classifier,
-            train_loss=epoch_train_loss,
-            train_accuracy=epoch_train_accuracy,
-            val_loss=epoch_val_loss,
-            val_accuracy=epoch_val_accuracy,
-            batch_profile=SimpleNamespace(
-                train_loss=batch_train_loss,
-                train_accuracy=batch_train_accuracy,
-                val_loss=batch_val_loss,
-                val_accuracy=batch_val_accuracy,
-            ),
-        )
-        for observer, condition in self.epoch_observers:
-            if condition(epoch):
-                observer(epoch_ns)
+        acc_list = self.history.validation["accuracy"]
+        if len(acc_list) > 0:
+            acc_list_str = f"{acc_list[-1].item():.2f}"
+        else:
+            acc_list_str = "???"
 
         progress_info = {
-            "val_loss": f"{epoch_val_loss:.2g}",
-            "val_acc": f"{epoch_val_accuracy:.2f}",
+            "epoch": f"{epoch}",
+            "val_loss": val_loss_str,
+            "val_acc": acc_list_str,
         }
         return progress_info
 
@@ -378,49 +411,24 @@ class Trainer:
         self.optimizer_kwargs = kwargs
         return self
 
-    def add_epoch_observer(
-        self, observer: Callable, condition: Optional[Callable] = None
-    ) -> "Trainer":
-        """Set an epoch-dependent observer.
-        
-        An observer is a function called after every training epoch, or after every
-        epoch satisfying a certain condition. The observer gets called with a namespace
-        argument,
-            observer(ns: SimpleNamespace)
-        where the `SimpleNamespace` contains
-            epoch:          the index of the epoch that just ended
-            net:            the network that is being optimized
-            classifier:     network used for classifier output (if any)
-            train_loss:     (predictive-coding) loss on training set
-            val_loss:       (predictive-coding) loss on validation set
-            train_accuracy: accuracy on training set
-            val_accuracy:   accuracy on validation set
-        
-        :param observer: the observer callback
-        :param condition: condition to be fulfilled for the observer to be called; this
-            has signature (epoch: int) -> bool; must return true to call observer
-        """
-        if condition is None:
-            condition = lambda _: True
-        self.epoch_observers.append((observer, condition))
-        return self
-
-    def add_batch_observer(
+    def add_observer(
         self,
         observer: Callable,
         condition: Optional[Callable] = None,
+        every: Optional[int] = None,
+        count: Optional[int] = None,
         profile: bool = False,
     ) -> "Trainer":
-        """Set a batch-dependent observer.
+        """Set an observer.
         
-        An observer is a function called after every batch of every training epoch -- or
-        after those satisfying a certain condition. The observer gets called with a
-        namespace argument,
+        An observer is a function called after every training batch that satisfies a
+        certain condition. The observer gets called with a namespace argument,
             observer(ns: SimpleNamespace)
         where the `SimpleNamespace` contains
-            epoch:          the index of the epoch that just ended
             batch:          the index of the batch that was just processed
+            epoch:          an epoch index
             net:            the network that is being optimized
+            trainer:        the `Trainer` object, `self`
             classifier:     network used for classifier output (if any)
             train_loss:     (predictive-coding) loss on training set
             train_accuracy: accuracy on training set
@@ -433,14 +441,17 @@ class Trainer:
         
         :param observer: the observer callback
         :param condition: condition to be fulfilled for the observer to be called; this
-            has signature (epoch: int, batch: int) -> bool; must return true to call
-            observer
+            has signature (batch: int) -> bool; must return true to call observer
+        :param every: run observer every `every` batches, starting at 0; overridden by
+            `condition`
+        :param count: run observer `count` times during a run; the batches at which the
+            observer is run are given by `floor(linspace(0, n_batches - 1, count))`;
+            overriden by `condition`
         :param profile: whether to request the loss and latent profile from
             `net.relax()`
         """
-        if condition is None:
-            condition = lambda epoch, batch: True
-        self.batch_observers.append((observer, condition, profile))
+        condition = self._get_condition_fct(condition, every, count)
+        self.observers.append((observer, condition, profile))
         return self
 
     def set_accuracy_fct(self, accuracy_fct: Callable) -> "Trainer":
@@ -473,52 +484,45 @@ class Trainer:
         self.classifier_criterion = criterion
         return self
 
-    def peek_epoch(
-        self, name: str, vars: Sequence, condition: Optional[Callable] = None
-    ) -> "Trainer":
-        """Add per-epoch monitoring.
-        
-        This is used to store values of parameters after each epoch (or after those
-        epochs obeying a condition). The values will be stored in `self.history` during
-        calls to `self.run()`.
-
-        :param name: the name to be used in `self.history` for the stored values
-        :param vars: variables to track; these should be names of attributes of the
-            model under training
-        :param condition: condition to be fulfilled for the observer to be called; this
-            has signature (epoch: int) -> bool
-        """
-        if hasattr(self.history, name):
-            raise ValueError("monitor name already in use")
-        self._setup_history(name, vars, "epoch")
-        return self.add_epoch_observer(
-            lambda ns, name=name: self._monitor(name, ns), condition
-        )
-
-    def peek_batch(
-        self, name: str, vars: Sequence, condition: Optional[Callable] = None
+    def peek(
+        self,
+        name: str,
+        vars: Sequence,
+        condition: Optional[Callable] = None,
+        every: Optional[int] = None,
+        count: Optional[int] = None,
     ) -> "Trainer":
         """Add per-batch monitoring.
         
-        This is used to store values of parameters after each batch (or after those
-        batches obeying a condition). The values will be stored in `self.history` during
-        calls to `self.run()`.
+        This is used to store values of parameters after each batch that obeys a
+        condition). The values will be stored in `self.history` during calls to
+        `self.run()`.
 
         :param name: the name to be used in `self.history` for the stored values
         :param vars: variables to track; these should be names of attributes of the
             model under training
-        :param condition: condition to be fulfilled for the observer to be called; this
-            has signature (epoch: int, batch: int) -> bool
+        :param condition: condition to be fulfilled for values to be stored; see
+            `add_observer`
+        :param every: store every `every` batches; see `add_observer`
+        :param count: store `count` times during a run; see `add_observer`
         """
         if hasattr(self.history, name):
             raise ValueError("monitor name already in use")
         self._setup_history(name, vars, "batch")
-        return self.add_batch_observer(
-            lambda ns, name=name: self._monitor(name, ns), condition
+        return self.add_observer(
+            lambda ns, name=name: self._monitor(name, ns),
+            condition=condition,
+            every=every,
+            count=count,
         )
 
     def peek_sample(
-        self, name: str, vars: Sequence, condition: Optional[Callable] = None
+        self,
+        name: str,
+        vars: Sequence,
+        condition: Optional[Callable] = None,
+        every: Optional[int] = None,
+        count: Optional[int] = None,
     ) -> "Trainer":
         """Add per-sample monitoring.
         
@@ -528,19 +532,28 @@ class Trainer:
         :param name: the name to be used in `self.history` for the stored values
         :param vars: variables to track; these should be names of attributes of the
             model under training
-        :param condition: condition to be fulfilled for the observer to be called; this
-            has signature (epoch: int, batch: int) -> bool; either all or none of the
-            samples in a batch are stored
+        :param condition: condition to be fulfilled for values to be stored; see
+            `add_observer`
+        :param every: store every `every` batches; see `add_observer`
+        :param count: store `count` times during a run; see `add_observer`
         """
         if hasattr(self.history, name):
             raise ValueError("monitor name already in use")
         self._setup_history(name, vars, "sample")
-        return self.add_batch_observer(
-            lambda ns, name=name: self._sample_monitor(name, ns), condition
+        return self.add_observer(
+            lambda ns, name=name: self._sample_monitor(name, ns),
+            condition=condition,
+            every=every,
+            count=count,
         )
 
     def peek_fast_dynamics(
-        self, name: str, vars: Sequence, condition: Optional[Callable] = None
+        self,
+        name: str,
+        vars: Sequence,
+        condition: Optional[Callable] = None,
+        every: Optional[int] = None,
+        count: Optional[int] = None,
     ) -> "Trainer":
         """Add monitoring of fast (`relax`) dynamics.
         
@@ -551,32 +564,97 @@ class Trainer:
         :param name: the name to be used in `self.history` for the stored values
         :param vars: variables to track; these should be a subset of the variables
             returned by `net.relax()` when `latent_profile` is true;
-        :param condition: condition to be fulfilled for the observer to be called; this
-            has signature (epoch: int, batch: int) -> bool; either all or none of the
-            samples in a batch are stored
+        :param condition: condition to be fulfilled for values to be stored; see
+            `add_observer`
+        :param every: store every `every` batches; see `add_observer`
+        :param count: store `count` times during a run; see `add_observer`
         """
         if hasattr(self.history, name):
             raise ValueError("monitor name already in use")
         self._setup_history(name, vars, "sample")
-        return self.add_batch_observer(
+        return self.add_observer(
             lambda ns, name=name: self._sub_sample_monitor(name, ns),
-            condition,
+            condition=condition,
+            every=every,
+            count=count,
             profile=True,
         )
 
-    def add_scheduler(self, scheduler: Callable) -> "Trainer":
+    def peek_validation(
+        self,
+        condition: Optional[Callable] = None,
+        every: Optional[int] = None,
+        count: Optional[int] = None,
+    ) -> "Trainer":
+        """Set how often to evaluate on validation set.
+        
+        The values are stored in `self.history` during calls to `self.run()`.
+
+        :param condition: condition to be fulfilled for values to be stored; see
+            `add_observer`
+        :param every: store every `every` batches; see `add_observer`
+        :param count: store `count` times during a run; see `add_observer`
+        """
+        self.validation_condition = self._get_condition_fct(condition, every, count)
+        return self
+
+    def add_scheduler(
+        self,
+        scheduler: Callable,
+        condition: Optional[Callable] = None,
+        every: Optional[int] = None,
+    ) -> "Trainer":
         """Add a constructor for a learning-rate scheduler.
         
         Calling `scheduler()` with the optimizer as an argument should create a
         learning-rate scheduler. (This is needed since the optimizer is only generated
-        during a call to `run()`.)
+        during a call to `run()`.) The scheduler is run after every epoch, by default,
+        or according to the given `condition`, `every`, or `count`.        
 
         You can use an inline function to pass additional arguments to standard
         schedulers, e.g.:
             lambda optimizer: torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.9)
+        
+        :param scheduler: the constructor for the scheduler
+        :param condition: condition to be fulfilled for the observer to be called; this
+            has signature (batch: int) -> bool; default: after every epoch
+        :param every: run observer every `every` batches; unlike observers, this is not
+            run on the 0th batch, but starting at batch `every - 1`; overridden by
+            `condition`
         """
-        self.schedulers.append(scheduler)
+        if condition is None:
+            if every is None:
+                every = len(self.train_loader)
+            condition = lambda batch, every=every: (batch + 1) % every == 0
+        self.schedulers.append((scheduler, condition))
         return self
+
+    def _get_condition_fct(
+        self, condition: Optional[Callable], every: Optional[int], count: Optional[int],
+    ):
+        """Convert various ways of specifying a condition to a function."""
+        if condition is None:
+            if every is not None:
+                condition = lambda batch, every=every: batch % every == 0
+            elif count is not None and count > 0:
+                condition = lambda batch, count=count: self._count_condition(
+                    batch, count
+                )
+            else:
+                condition = lambda _: True
+
+        return condition
+
+    def _count_condition(self, batch: int, count: int) -> bool:
+        """Condition function for running exactly `count` times during a run."""
+        # should be true when batch = floor(k * (n - 1) / (count - 1)) for integer k
+        # this implies (batch * (count - 1)) % (n - 1) == 0 or > (n - count).
+        if count == 1:
+            return batch == 0
+        else:
+            n_batches = self._n_batches
+            mod = (batch * (count - 1)) % (n_batches - 1)
+            return mod == 0 or mod > n_batches - count
 
     def _monitor(self, name: str, ns: SimpleNamespace):
         """Observer called to update per-epoch or per-batch monitors."""

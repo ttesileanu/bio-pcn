@@ -36,9 +36,11 @@ dataset = load_mnist(
 n_epochs = 300
 dims = [784, 5, 10]
 
-z_it = 100
+z_it = 80
 z_lr = 0.1
 tau = 1.0
+rho = 0.015
+# rho = 0.0012
 
 torch.manual_seed(123)
 
@@ -48,8 +50,6 @@ g_a[-1] *= 2
 
 g_b = 0.5 * torch.ones(len(dims) - 2)
 g_b[0] *= 2
-
-rho = 0.015
 
 net = LinearBioPCN(
     dims,
@@ -70,7 +70,7 @@ net = net.to(device)
 trainer = Trainer(net, dataset["train"], dataset["validation"])
 trainer.set_classifier("linear")
 
-initial_lr = 0.004
+initial_lr = 0.001
 final_lr = initial_lr
 trainer.set_optimizer(torch.optim.Adam, lr=initial_lr)
 # trainer.set_optimizer(torch.optim.SGD, lr=initial_lr)
@@ -83,15 +83,14 @@ trainer.add_scheduler(
     )
 )
 
-trainer.peek_epoch("weight", ["W_a", "W_b", "Q", "M"])
+trainer.peek("weight", ["W_a", "W_b", "Q", "M"], every=10)
 trainer.peek_sample("latent", ["z"])
 
-fast_epochs = torch.linspace(0, n_epochs - 1, 4).int()
-batch_max = len(dataset["train"])
 trainer.peek_fast_dynamics(
     "fast",
     ["a", "b", "z", "n"],
-    condition=lambda epoch, batch: epoch in fast_epochs and batch == batch_max - 1,
+    count=4,
+    # sample_mask=torch.arange(batch_size) == batch_size - 1,
 )
 
 results = trainer.run(n_epochs, progress=tqdm)
@@ -105,10 +104,10 @@ with dv.FigureManager() as (_, ax):
     cmap = mpl.cm.winter
     crt_sel = trainer.history.fast["sample"] == batch_size - 1
 
-    crt_epoch = trainer.history.fast["epoch"][crt_sel]
+    crt_batch = trainer.history.fast["batch"][crt_sel]
     crt_z = trainer.history.fast["z:1"][crt_sel]
 
-    n = len(crt_epoch)
+    n = len(crt_batch)
     for i in range(n):
         color = cmap(int(cmap.N * (0.2 + 0.8 * i / n)))
         crt_diff = crt_z[i, :, :] - crt_z[i, 0, :]
@@ -118,7 +117,7 @@ with dv.FigureManager() as (_, ax):
     sm = mpl.cm.ScalarMappable(cmap=cmap, norm=mpl.pyplot.Normalize(vmin=0, vmax=n))
     sm.ax = ax
     cbar = dv.colorbar(sm)
-    cbar.set_label("epoch")
+    cbar.set_label("batch")
 
     ax.set_xlabel("fast dynamics iteration")
     ax.set_ylabel("latent $(z - z_0) / \\rm{max}| z - z_0|$")
@@ -194,12 +193,12 @@ with dv.FigureManager() as (_, ax):
 # %%
 
 with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
-    ax1.plot(results.train["pc_loss"], label="train")
-    ax1.plot(results.validation["pc_loss"], label="val")
+    ax1.plot(results.train["batch"], results.train["pc_loss"], label="train")
+    ax1.plot(results.validation["batch"], results.validation["pc_loss"], label="val")
     ax1.legend(frameon=False)
     ax1.annotate(
         f"{results.validation['pc_loss'][-1]:.2g}",
-        (n_epochs, results.validation["pc_loss"][-1]),
+        (results.validation["batch"][-1], results.validation["pc_loss"][-1]),
         xytext=(3, 0),
         textcoords="offset points",
         c="C1",
@@ -207,17 +206,17 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
         fontweight="bold",
     )
     ax1.set_yscale("log")
-    ax1.set_xlabel("epoch")
+    ax1.set_xlabel("batch")
     ax1.set_ylabel("predictive-coding loss")
 
     train_error_rate = 100 * (1.0 - results.train["accuracy"])
     val_error_rate = 100 * (1.0 - results.validation["accuracy"])
-    ax2.plot(train_error_rate, label="train")
-    ax2.plot(val_error_rate, label="val")
+    ax2.plot(results.train["batch"], train_error_rate, label="train")
+    ax2.plot(results.validation["batch"], val_error_rate, label="val")
     ax2.legend(frameon=False)
     ax2.annotate(
         f"{val_error_rate[-1]:.1f}%",
-        (n_epochs, val_error_rate[-1]),
+        (results.validation["batch"][-1], val_error_rate[-1]),
         xytext=(3, 0),
         textcoords="offset points",
         c="C1",
@@ -225,7 +224,7 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
         fontweight="bold",
     )
     ax2.set_ylim(0, None)
-    ax2.set_xlabel("epoch")
+    ax2.set_xlabel("batch")
     ax2.set_ylabel("error rate (%)")
 
 # %% [markdown]
@@ -237,12 +236,15 @@ D = len(net.inter_dims)
 with dv.FigureManager(2, D, squeeze=False) as (_, axs):
     for ax_row, w_choice in zip(axs, ["W_a", "W_b"]):
         for k, ax in enumerate(ax_row):
-            crt_data = trainer.history.weight[f"{w_choice}:{k}"].reshape(n_epochs, -1)
+            crt_data0 = trainer.history.weight[f"{w_choice}:{k}"]
+            crt_data = crt_data0.reshape(len(crt_data0), -1)
             n_lines = crt_data.shape[1]
             alpha = max(min(50 / n_lines, 0.5), 0.01)
-            ax.plot(crt_data, c="k", lw=0.5, alpha=alpha)
+            ax.plot(
+                trainer.history.weight["batch"], crt_data, c="k", lw=0.5, alpha=alpha
+            )
 
-            ax.set_xlabel("epoch")
+            ax.set_xlabel("batch")
             ax.set_ylabel(w_choice)
 
             if w_choice == "W_a":

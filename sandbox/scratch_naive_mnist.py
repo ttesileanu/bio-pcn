@@ -31,10 +31,12 @@ dataset = load_mnist(n_train=5000, n_validation=1000, device=device)
 # ## Train PCN
 
 # %%
-n_epochs = 50
+n_epochs = 300
 dims = [784, 5, 10]
 it_inference = 50
-lr_inference = 0.04
+lr_inference = 0.07
+rho = 0.015
+# rho = 0.0012
 
 torch.manual_seed(123)
 
@@ -44,6 +46,8 @@ net = PCNetwork(
     lr_inference=lr_inference,
     it_inference=it_inference,
     variances=1.0,
+    constrained=True,
+    rho=rho,
     bias=False,
 )
 net = net.to(device)
@@ -51,10 +55,8 @@ net = net.to(device)
 trainer = Trainer(net, dataset["train"], dataset["validation"])
 trainer.set_classifier("linear")
 
-trainer.set_optimizer(torch.optim.Adam, lr=0.005)
+trainer.set_optimizer(torch.optim.Adam, lr=0.003)
 # trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.99))
-
-trainer.peek_epoch("classifier", ["classifier.linear.weight", "classifier.linear.bias"])
 
 results = trainer.run(n_epochs, progress=tqdm)
 
@@ -93,7 +95,7 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
 
 # %%
 z_it = 50
-z_lr = 0.1
+z_lr = 0.02
 
 torch.manual_seed(123)
 
@@ -112,15 +114,17 @@ biopcn_net = LinearBioPCN(
     g_b=g_b,
     c_m=0,
     l_s=g_b,
+    rho=rho,
     bias_a=False,
     bias_b=False,
+    q0_scale=np.sqrt(1 + dims[2] / dims[1]),
 )
 biopcn_net = biopcn_net.to(device)
 
 biopcn_trainer = Trainer(biopcn_net, dataset["train"], dataset["validation"])
 biopcn_trainer.set_classifier("linear")
 
-biopcn_trainer.set_optimizer(torch.optim.Adam, lr=0.002)
+biopcn_trainer.set_optimizer(torch.optim.Adam, lr=0.004)
 # biopcn_trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.997))
 
 biopcn_results = biopcn_trainer.run(n_epochs, progress=tqdm)

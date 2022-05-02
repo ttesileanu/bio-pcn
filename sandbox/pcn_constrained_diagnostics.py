@@ -37,8 +37,10 @@ n_epochs = 300
 dims = [784, 5, 10]
 
 z_it = 50
-z_lr = 0.1
-rho = 0.015
+z_lr = 0.07
+# rho = 0.015
+# rho = 0.001875
+rho = 0.0012
 
 torch.manual_seed(123)
 
@@ -47,6 +49,7 @@ net = PCNetwork(
     lr_inference=z_lr,
     it_inference=z_it,
     constrained=True,
+    # constrained=False,
     rho=rho,
     fast_optimizer=torch.optim.Adam,
     bias=False,
@@ -56,18 +59,19 @@ net = net.to(device)
 trainer = Trainer(net, dataset["train"], dataset["validation"])
 trainer.set_classifier("linear")
 
-trainer.set_optimizer(torch.optim.Adam, lr=0.001)
+trainer.set_optimizer(torch.optim.Adam, lr=0.003)
 # trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.9))
 
-trainer.peek_epoch("weight", ["W", "Q"])
+if net.constrained:
+    trainer.peek("weight", ["W", "Q"], every=10)
+else:
+    trainer.peek("weight", ["W"], every=10)
 trainer.peek_sample("latent", ["z"])
 
 fast_epochs = torch.linspace(0, n_epochs - 1, 4).int()
 batch_max = len(dataset["train"])
 trainer.peek_fast_dynamics(
-    "fast",
-    ["z"],
-    condition=lambda epoch, batch: epoch in fast_epochs and batch == batch_max - 1,
+    "fast", ["z"], count=4,
 )
 
 results = trainer.run(n_epochs, progress=tqdm)
@@ -81,10 +85,10 @@ with dv.FigureManager() as (_, ax):
     cmap = mpl.cm.winter
     crt_sel = trainer.history.fast["sample"] == batch_size - 1
 
-    crt_epoch = trainer.history.fast["epoch"][crt_sel]
+    crt_batch = trainer.history.fast["batch"][crt_sel]
     crt_z = trainer.history.fast["z:1"][crt_sel]
 
-    n = len(crt_epoch)
+    n = len(crt_batch)
     for i in range(n):
         color = cmap(int(cmap.N * (0.2 + 0.8 * i / n)))
         crt_diff = crt_z[i, :, :] - crt_z[i, 0, :]
@@ -94,7 +98,7 @@ with dv.FigureManager() as (_, ax):
     sm = mpl.cm.ScalarMappable(cmap=cmap, norm=mpl.pyplot.Normalize(vmin=0, vmax=n))
     sm.ax = ax
     cbar = dv.colorbar(sm)
-    cbar.set_label("epoch")
+    cbar.set_label("batch")
 
     ax.set_xlabel("fast dynamics iteration")
     ax.set_ylabel("latent $(z - z_0) / \\rm{max}| z - z_0|$")
@@ -154,18 +158,28 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
     ax2.set_ylabel("maximum $z$-cov eval")
     ax2.set_ylim(0, 5 * rho)
 
+# %%
+
+all_evals = torch.stack([torch.linalg.eigh(_)[0] for _ in z_cov])
+with dv.FigureManager() as (_, ax):
+    ax.axhline(rho, c="k", ls="--", lw=1)
+    ax.plot(all_evals, alpha=0.5, lw=1)
+    ax.set_xlabel("epoch")
+    ax.set_ylabel("evals of $z$-cov")
+    ax.set_ylim(0, 5 * rho)
+
 # %% [markdown]
 # ## Show loss and accuracy evolution
 
 # %%
 
 with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
-    ax1.plot(results.train["pc_loss"], label="train")
-    ax1.plot(results.validation["pc_loss"], label="val")
+    ax1.plot(results.train["batch"], results.train["pc_loss"], label="train")
+    ax1.plot(results.validation["batch"], results.validation["pc_loss"], label="val")
     ax1.legend(frameon=False)
     ax1.annotate(
         f"{results.validation['pc_loss'][-1]:.2g}",
-        (n_epochs, results.validation["pc_loss"][-1]),
+        (results.validation["batch"][-1], results.validation["pc_loss"][-1]),
         xytext=(3, 0),
         textcoords="offset points",
         c="C1",
@@ -173,17 +187,17 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
         fontweight="bold",
     )
     ax1.set_yscale("log")
-    ax1.set_xlabel("epoch")
+    ax1.set_xlabel("batch")
     ax1.set_ylabel("predictive-coding loss")
 
     train_error_rate = 100 * (1.0 - results.train["accuracy"])
     val_error_rate = 100 * (1.0 - results.validation["accuracy"])
-    ax2.plot(train_error_rate, label="train")
-    ax2.plot(val_error_rate, label="val")
+    ax2.plot(results.train["batch"], train_error_rate, label="train")
+    ax2.plot(results.validation["batch"], val_error_rate, label="val")
     ax2.legend(frameon=False)
     ax2.annotate(
         f"{val_error_rate[-1]:.1f}%",
-        (n_epochs, val_error_rate[-1]),
+        (results.validation["batch"][-1], val_error_rate[-1]),
         xytext=(3, 0),
         textcoords="offset points",
         c="C1",
@@ -191,7 +205,7 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
         fontweight="bold",
     )
     ax2.set_ylim(0, None)
-    ax2.set_xlabel("epoch")
+    ax2.set_xlabel("batch")
     ax2.set_ylabel("error rate (%)")
 
 # %% [markdown]
@@ -202,12 +216,13 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
 D = len(net.dims) - 1
 with dv.FigureManager(1, D) as (_, axs):
     for k, ax in enumerate(axs):
-        crt_data = trainer.history.weight[f"W:{k}"].reshape(n_epochs, -1)
+        crt_data0 = trainer.history.weight[f"W:{k}"]
+        crt_data = crt_data0.reshape(len(crt_data0), -1)
         n_lines = crt_data.shape[1]
         alpha = max(min(50 / n_lines, 0.5), 0.01)
-        ax.plot(crt_data, c="k", lw=0.5, alpha=alpha)
+        ax.plot(trainer.history.weight["batch"], crt_data, c="k", lw=0.5, alpha=alpha)
 
-        ax.set_xlabel("epoch")
+        ax.set_xlabel("batch")
         ax.set_ylabel("weight")
 
 # %%
