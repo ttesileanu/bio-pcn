@@ -199,6 +199,8 @@ class Trainer:
             classifier_optim = self.classifier_optim_class(
                 self.classifier.parameters(), **self.classifier_optim_kwargs
             )
+        else:
+            classifier_optim = None
 
         return optimizer, classifier_optim
 
