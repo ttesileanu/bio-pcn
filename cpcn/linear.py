@@ -21,7 +21,7 @@ class LinearBioPCN:
         g_a: Union[Sequence, float] = 1.0,
         g_b: Union[Sequence, float] = 1.0,
         l_s: Union[Sequence, float] = 1.0,
-        c_m: Union[Sequence, float] = 1.0,
+        c_m: Union[Sequence, float] = 0.0,
         rho: Union[Sequence, float] = 1.0,
         tau: Union[Sequence, float] = 1.0,
         bias_a: bool = True,

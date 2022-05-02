@@ -1104,3 +1104,8 @@ def test_init_scale(var):
 
     for theta1, theta2 in zip(getattr(net1, var), getattr(net2, var)):
         assert torch.allclose(theta2, scale * theta1)
+
+
+def test_default_c_m_is_zero():
+    net = LinearBioPCN([2, 5, 3])
+    assert net.c_m[0] == 0
