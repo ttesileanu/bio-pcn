@@ -3,3 +3,4 @@
 __pycache__
 cpcn.egg-info
 .vscode
+compare_to_old_code*
