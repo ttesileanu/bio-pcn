@@ -41,6 +41,8 @@ def load_mnist(
     cache_path: str = "data/",
     device: Optional[torch.device] = None,
     batch_size: int = 128,
+    batch_size_val: int = 1000,
+    batch_size_test: int = 1000,
     return_loaders: bool = True,
 ) -> dict:
     """Load (parts of) the MNIST dataset and split out a validation set.
@@ -55,6 +57,10 @@ def load_mnist(
     :param cache_path: cache from where to load / where to store the datasets
     :param device: device to send the data to
     :param batch_size: if `return_loaders` is true, this sets the batch size used
+    :param batch_size_val: if `return_loaders` is true, this sets the batch size for the
+        validation set
+    :param batch_size_test: if `return_loaders` is true, this sets the batch size for the
+        test set
     :param return_loaders: if true, data loaders are returned instead of the data sets;
         only the training loader uses shuffling
     :return: a dictionary with keys `"train"`, `"validation"`, `"test"`, each of which
@@ -99,9 +105,16 @@ def load_mnist(
             labels = labels.to(device)
 
         if return_loaders:
+            batch_size_dict = {
+                "train": batch_size,
+                "validation": batch_size_val,
+                "test": batch_size_test,
+            }
             tensor_dataset = torch.utils.data.TensorDataset(input, labels)
             dataset[key] = torch.utils.data.DataLoader(
-                tensor_dataset, batch_size=batch_size, shuffle=(key == "train")
+                tensor_dataset,
+                batch_size=batch_size_dict[key],
+                shuffle=(key == "train"),
             )
         else:
             dataset[key] = (input, labels)

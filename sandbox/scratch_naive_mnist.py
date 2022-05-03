@@ -18,20 +18,19 @@ from cpcn import LinearBioPCN, PCNetwork, load_mnist, Trainer
 # ## Setup
 
 # %%
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = torch.device("cpu")
 
 # for reproducibility
 torch.manual_seed(123)
 
-# this creates the loaders, by default
-dataset = load_mnist(n_train=5000, n_validation=1000, device=device)
+# get train, validation, and test loaders for MNIST
+dataset = load_mnist(n_validation=1000, device=device)
 
 # %% [markdown]
 # ## Train PCN
 
 # %%
-n_epochs = 300
+n_batches = 3000
 dims = [784, 5, 10]
 it_inference = 50
 lr_inference = 0.07
@@ -53,12 +52,13 @@ net = PCNetwork(
 net = net.to(device)
 
 trainer = Trainer(net, dataset["train"], dataset["validation"])
+trainer.peek_validation(every=10)
 trainer.set_classifier("linear")
 
 trainer.set_optimizer(torch.optim.Adam, lr=0.003)
 # trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.99))
 
-results = trainer.run(n_epochs, progress=tqdm)
+results = trainer.run(n_batches=n_batches, progress=tqdm)
 
 # %% [markdown]
 # ### Show PCN learning curves
@@ -67,7 +67,7 @@ results = trainer.run(n_epochs, progress=tqdm)
 with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
     ax1.semilogy(results.train["pc_loss"], label="train")
     ax1.semilogy(results.validation["pc_loss"], label="val")
-    ax1.set_xlabel("epoch")
+    ax1.set_xlabel("batch")
     ax1.set_ylabel("predictive-coding loss")
     ax1.legend(frameon=False)
     last_loss = results.train["pc_loss"][-1]
@@ -79,7 +79,7 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
 
     ax2.plot(100 * (1 - results.train["accuracy"]), label="train")
     ax2.plot(100 * (1 - results.validation["accuracy"]), label="val")
-    ax2.set_xlabel("epoch")
+    ax2.set_xlabel("batch")
     ax2.set_ylabel("error rate (%)")
     ax2.legend(frameon=False)
     last_acc = 100 * (1 - results.train["accuracy"][-1])
@@ -122,12 +122,13 @@ biopcn_net = LinearBioPCN(
 biopcn_net = biopcn_net.to(device)
 
 biopcn_trainer = Trainer(biopcn_net, dataset["train"], dataset["validation"])
+biopcn_trainer.peek_validation(every=10)
 biopcn_trainer.set_classifier("linear")
 
 biopcn_trainer.set_optimizer(torch.optim.Adam, lr=0.004)
 # biopcn_trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.997))
 
-biopcn_results = biopcn_trainer.run(n_epochs, progress=tqdm)
+biopcn_results = biopcn_trainer.run(n_batches=n_batches, progress=tqdm)
 
 # %% [markdown]
 # ### Show BioPCN learning curves
@@ -153,7 +154,7 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
         c="C1",
     )
 
-    ax1.set_xlabel("epoch")
+    ax1.set_xlabel("batch")
     ax1.set_ylabel("predictive-coding loss")
     ax1.legend(frameon=False)
 
@@ -167,7 +168,7 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
     ax2.plot(100 * (1 - results.validation["accuracy"]), c="C1", ls="--", alpha=0.7)
     ax2.plot(100 * (1 - biopcn_results.train["accuracy"]), c="C0", label="train")
     ax2.plot(100 * (1 - biopcn_results.validation["accuracy"]), c="C1", label="val")
-    ax2.set_xlabel("epoch")
+    ax2.set_xlabel("batch")
     ax2.set_ylabel("error rate (%)")
 
     last_acc = 100 * (1 - results.validation["accuracy"][-1])
