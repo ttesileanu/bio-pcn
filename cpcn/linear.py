@@ -31,6 +31,7 @@ class LinearBioPCN:
         wb0_scale: Union[Sequence, float] = 1.0,
         q0_scale: Union[Sequence, float] = 1.0,
         m0_scale: Union[Sequence, float] = 1.0,
+        init_scale_type: str = "unif_out_only",
     ):
         """Initialize the network.
 
@@ -55,6 +56,10 @@ class LinearBioPCN:
         :param wb0_scale: scale(s) for the (random) initial values of W_b
         :param q0_scale: scale(s) for the (random) initial values of Q
         :param m0_scale: scale(s) for the (random) initial values of M
+        :param init_scale_type: how to initialize weights; can be `"xavier_uniform"` or
+            `"unif_out_only"`; both generate uniform values between `-a` and `a`, where
+            `a ** 2` is `6 / (n_in + n_out)` for `"xavier_uniform"` and `6 / n_out` for
+            `"unif_out_only"`; these are scaled by the relevant scale factors above
         """
         self.training = True
 
@@ -110,8 +115,8 @@ class LinearBioPCN:
             self.M.append(torch.Tensor(self.pyr_dims[i + 1], self.pyr_dims[i + 1]))
 
         # initialize weights and biases
-        self._initialize_interlayer_weights(wa0_scale, wb0_scale)
-        self._initialize_intralayer_weights(q0_scale, m0_scale)
+        self._initialize_interlayer_weights(wa0_scale, wb0_scale, init_scale_type)
+        self._initialize_intralayer_weights(q0_scale, m0_scale, init_scale_type)
         self._initialize_biases()
 
         # create neural variables
@@ -468,24 +473,40 @@ class LinearBioPCN:
         """ Set in evaluation mode. """
         self.training = False
 
+    def _get_weight_init_fct(self, init_scale_type: str):
+        """Return the function used to initialize weights."""
+        if init_scale_type == "xavier_uniform":
+            return nn.init.xavier_uniform_
+        elif init_scale_type == "unif_out_only":
+
+            def scaling_fct_(tensor: torch.Tensor, gain: float):
+                a = gain * np.sqrt(1 / tensor.shape[1])
+                torch.nn.init.uniform_(tensor, -a, a)
+
+            return scaling_fct_
+        else:
+            raise ValueError(f"unknown init_scale_type, {init_scale_type}")
+
     def _initialize_interlayer_weights(
-        self, wa0_scale: torch.Tensor, wb0_scale: torch.Tensor
+        self, wa0_scale: torch.Tensor, wb0_scale: torch.Tensor, init_scale_type: str
     ):
+        init_fct = self._get_weight_init_fct(init_scale_type)
         for W, scale in zip(self.W_a, wa0_scale):
-            nn.init.xavier_uniform_(W, gain=scale)
+            init_fct(W, gain=scale)
             W.requires_grad = True
         for W, scale in zip(self.W_b, wb0_scale):
-            nn.init.xavier_uniform_(W, gain=scale)
+            init_fct(W, gain=scale)
             W.requires_grad = True
 
     def _initialize_intralayer_weights(
-        self, q0_scale: torch.Tensor, m0_scale: torch.Tensor
+        self, q0_scale: torch.Tensor, m0_scale: torch.Tensor, init_scale_type: str
     ):
+        init_fct = self._get_weight_init_fct(init_scale_type)
         for Q, scale in zip(self.Q, q0_scale):
-            nn.init.xavier_uniform_(Q, gain=scale)
+            init_fct(Q, gain=scale)
             Q.requires_grad = True
         for M, scale in zip(self.M, m0_scale):
-            nn.init.xavier_uniform_(M, gain=scale)
+            init_fct(M, gain=scale)
             M.requires_grad = True
 
     def _initialize_biases(self):

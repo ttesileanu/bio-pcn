@@ -1109,3 +1109,45 @@ def test_init_scale(var):
 def test_default_c_m_is_zero():
     net = LinearBioPCN([2, 5, 3])
     assert net.c_m[0] == 0
+
+
+@pytest.mark.parametrize("var", ["W_a", "W_b", "Q", "M"])
+def test_initial_param_scale_depends_on_out_only(var):
+    torch.manual_seed(2)
+    n = 500
+    m = 50
+    p = 25
+    net = LinearBioPCN([m, n, m], inter_dims=[p])
+
+    value = getattr(net, var)[0]
+    sigma = torch.std(value).item()
+
+    n_in, n_out = value.shape
+    # sqrt(3) from stdev of uniform distribution
+    expected = np.sqrt(1 / n_out) / np.sqrt(3)
+
+    n_elem = value.numel()
+    tol = 4 / np.sqrt(n_elem)
+
+    assert sigma == pytest.approx(expected, rel=tol)
+
+
+@pytest.mark.parametrize("var", ["W_a", "W_b", "Q", "M"])
+def test_initial_param_scale_xavier(var):
+    torch.manual_seed(3)
+    n = 500
+    m = 50
+    p = 25
+    net = LinearBioPCN([m, n, m], inter_dims=[p], init_scale_type="xavier_uniform")
+
+    value = getattr(net, var)[0]
+    sigma = torch.std(value).item()
+
+    n_in, n_out = value.shape
+    # sqrt(3) from stdev of uniform distribution
+    expected = np.sqrt(6 / (n_in + n_out)) / np.sqrt(3)
+
+    n_elem = value.numel()
+    tol = 4 / np.sqrt(n_elem)
+
+    assert sigma == pytest.approx(expected, rel=tol)
