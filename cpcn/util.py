@@ -1,6 +1,5 @@
 """Define some utilities."""
 
-from syslog import LOG_DAEMON
 import torch
 import torchvision
 import numpy as np
