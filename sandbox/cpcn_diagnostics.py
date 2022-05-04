@@ -36,7 +36,6 @@ dims = [784, 5, 10]
 
 z_it = 80
 z_lr = 0.1
-tau = 1.0
 rho = 0.015
 # rho = 0.0012
 
@@ -58,7 +57,6 @@ net = LinearBioPCN(
     c_m=0,
     l_s=g_b,
     rho=rho,
-    tau=tau,
     fast_optimizer=torch.optim.Adam,
     bias_a=False,
     bias_b=False,

@@ -23,7 +23,6 @@ class LinearBioPCN:
         l_s: Union[Sequence, float] = 1.0,
         c_m: Union[Sequence, float] = 0.0,
         rho: Union[Sequence, float] = 1.0,
-        tau: Union[Sequence, float] = 1.0,
         bias_a: bool = True,
         bias_b: bool = True,
         fast_optimizer: Callable = torch.optim.Adam,
@@ -46,8 +45,6 @@ class LinearBioPCN:
         :param c_m: strength of lateral connections
         :param rho: squared radius for whiteness constraint; that is, the constraint is
             cov_matrix(z) <= rho * identity_matrix
-        :param tau: learning rate divisor for connections to interneurons; that is, the
-            learning rate for the `Q` parameters is `1 / tau` times lr for other params
         :param bias_a: whether to have bias terms at the apical end
         :param bias_b: whether to have bias terms at the basal end
         :param fast_optimizer: constructor for the optimizer used for the fast dynamics
@@ -80,7 +77,6 @@ class LinearBioPCN:
         self.l_s = self._expand_per_layer(l_s)
         self.c_m = self._expand_per_layer(c_m)
         self.rho = self._expand_per_layer(rho)
-        self.tau = self._expand_per_layer(tau)
 
         wa0_scale = self._expand_per_layer(wa0_scale)
         wb0_scale = self._expand_per_layer(wb0_scale)
@@ -297,7 +293,7 @@ class LinearBioPCN:
             if grad.ndim == self.Q[i].ndim + 1:
                 # this is a batch evaluation!
                 grad = red_fct(grad, 0)
-            self.Q[i].grad = grad / self.tau[i]
+            self.Q[i].grad = grad
 
             # lateral
             pre = self.z[i + 1]
@@ -565,8 +561,7 @@ class LinearBioPCN:
             f"g_b={repr(self.g_b)}, "
             f"l_s={repr(self.l_s)}, "
             f"c_m={repr(self.c_m)}, "
-            f"rho={repr(self.rho)}, "
-            f"tau={repr(self.tau)}"
+            f"rho={repr(self.rho)} "
             f")"
         )
         return s
