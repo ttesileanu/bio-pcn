@@ -12,7 +12,7 @@ import torch
 from tqdm.notebook import tqdm
 from functools import partial
 
-from cpcn import LinearBioPCN, PCNetwork, load_mnist, Trainer
+from cpcn import LinearBioPCN, PCNetwork, load_mnist, Trainer, show_learning_curves
 
 # %% [markdown]
 # ## Setup
@@ -64,31 +64,8 @@ results = trainer.run(n_batches=n_batches, progress=tqdm)
 # ### Show PCN learning curves
 
 # %%
-with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
-    ax1.semilogy(results.train["pc_loss"], label="train")
-    ax1.semilogy(results.validation["pc_loss"], label="val")
-    ax1.set_xlabel("batch")
-    ax1.set_ylabel("predictive-coding loss")
-    ax1.legend(frameon=False)
-    last_loss = results.train["pc_loss"][-1]
-    ax1.annotate(f"{last_loss:.3f}", (len(results.train["pc_loss"]), last_loss), c="C0")
-    last_loss = results.validation["pc_loss"][-1]
-    ax1.annotate(
-        f"{last_loss:.3f}", (len(results.validation["pc_loss"]), last_loss), c="C1"
-    )
 
-    ax2.plot(100 * (1 - results.train["accuracy"]), label="train")
-    ax2.plot(100 * (1 - results.validation["accuracy"]), label="val")
-    ax2.set_xlabel("batch")
-    ax2.set_ylabel("error rate (%)")
-    ax2.legend(frameon=False)
-    last_acc = 100 * (1 - results.train["accuracy"][-1])
-    ax2.annotate(f"{last_acc:.1f}%", (len(results.train["accuracy"]), last_acc), c="C0")
-    last_acc = 100 * (1 - results.validation["accuracy"][-1])
-    ax2.annotate(
-        f"{last_acc:.1f}%", (len(results.validation["accuracy"]), last_acc), c="C1"
-    )
-    ax2.set_ylim(0, 100)
+_ = show_learning_curves(results)
 
 # %% [markdown]
 # ## Train BioPCN
@@ -134,55 +111,21 @@ biopcn_results = biopcn_trainer.run(n_batches=n_batches, progress=tqdm)
 # ### Show BioPCN learning curves
 
 # %%
-with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
-    ax1.semilogy(
-        results.train["pc_loss"], c="C0", ls="--", alpha=0.7, label="Whittington&Bogacz"
-    )
-    ax1.semilogy(results.validation["pc_loss"], c="C1", ls="--", alpha=0.7)
 
-    ax1.semilogy(biopcn_results.train["pc_loss"], c="C0", label="train")
-    ax1.semilogy(biopcn_results.validation["pc_loss"], c="C1", label="val")
-
-    last_loss = results.validation["pc_loss"][-1]
-    ax1.annotate(
-        f"{last_loss:.3f}", (len(results.validation["pc_loss"]), last_loss), c="C1"
+with dv.FigureManager(1, 2) as (_, axs):
+    show_learning_curves(
+        results,
+        show_train=False,
+        labels=("", "Whittington&Bogacz"),
+        colors=("C0", "gray"),
+        axs=axs,
     )
-    last_loss = biopcn_results.validation["pc_loss"][-1]
-    ax1.annotate(
-        f"{last_loss:.3f}",
-        (len(biopcn_results.validation["pc_loss"]), last_loss),
-        c="C1",
+    show_learning_curves(
+        biopcn_results,
+        show_train=False,
+        labels=("", "BioPCN"),
+        colors=("C0", "red"),
+        axs=axs,
     )
-
-    ax1.set_xlabel("batch")
-    ax1.set_ylabel("predictive-coding loss")
-    ax1.legend(frameon=False)
-
-    ax2.plot(
-        100 * (1 - results.train["accuracy"]),
-        c="C0",
-        ls="--",
-        alpha=0.7,
-        label="Whittington&Bogacz",
-    )
-    ax2.plot(100 * (1 - results.validation["accuracy"]), c="C1", ls="--", alpha=0.7)
-    ax2.plot(100 * (1 - biopcn_results.train["accuracy"]), c="C0", label="train")
-    ax2.plot(100 * (1 - biopcn_results.validation["accuracy"]), c="C1", label="val")
-    ax2.set_xlabel("batch")
-    ax2.set_ylabel("error rate (%)")
-
-    last_acc = 100 * (1 - results.validation["accuracy"][-1])
-    ax2.annotate(
-        f"{last_acc:.1f}%", (len(results.validation["accuracy"]), last_acc), c="C1"
-    )
-    last_acc = 100 * (1 - biopcn_results.validation["accuracy"][-1])
-    ax2.annotate(
-        f"{last_acc:.1f}%",
-        (len(biopcn_results.validation["accuracy"]), last_acc),
-        c="C1",
-    )
-
-    ax2.legend(frameon=False)
-    ax2.set_ylim(0, 100)
 
 # %%
