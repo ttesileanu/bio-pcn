@@ -14,12 +14,10 @@ device = torch.device("cpu")
 torch.manual_seed(123)
 
 batch_size = 100
-dataset = load_mnist(
-    n_train=2000, n_validation=500, batch_size=batch_size, device=device
-)
+dataset = load_mnist(n_validation=500, batch_size=batch_size, device=device)
 
 # create net, run training
-n_epochs = 10
+n_batches = 100
 dims = [784, 5, 10]
 
 z_it = 50
@@ -39,9 +37,9 @@ net = PCNetwork(
 net = net.to(device)
 
 trainer = Trainer(net, dataset["train"], dataset["validation"])
-trainer.set_classifier("linear")
+# trainer.set_classifier("linear")
 
 trainer.set_optimizer(torch.optim.Adam, lr=0.001)
 # trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.9))
 
-results = trainer.run(n_epochs, progress=tqdm)
+results = trainer.run(n_batches=n_batches)
