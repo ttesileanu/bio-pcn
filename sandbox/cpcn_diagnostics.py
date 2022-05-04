@@ -81,7 +81,7 @@ trainer.set_optimizer(torch.optim.Adam, lr=initial_lr)
 #     every=1,
 # )
 
-trainer.set_lr_factor("Q", 10.0)
+trainer.set_lr_factor("Q", 20.0)
 
 trainer.peek("weight", ["W_a", "W_b", "Q", "M"], every=10)
 trainer.peek_sample("latent", ["z"])
