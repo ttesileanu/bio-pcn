@@ -64,8 +64,8 @@ for i in tqdm(range(n_reps), desc="repetitions"):
     pcn = PCNetwork(
         dims,
         activation=lambda _: _,
-        lr_inference=best_pcn["z_lr"],
-        it_inference=z_it,
+        z_lr=best_pcn["z_lr"],
+        z_it=z_it,
         variances=1.0,
         constrained=True,
         rho=rho,

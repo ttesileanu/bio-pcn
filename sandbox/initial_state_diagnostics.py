@@ -23,8 +23,8 @@ dataset = load_mnist(n_validation=1000, device=device)
 
 # %%
 dims = [784, 5, 10]
-it_inference = 150
-lr_inference = 0.07
+z_it = 150
+z_lr = 0.07
 rho = 0.015
 # rho = 0.0012
 
@@ -35,8 +35,8 @@ torch.manual_seed(seed)
 pcn = PCNetwork(
     dims,
     activation=lambda _: _,
-    lr_inference=lr_inference,
-    it_inference=it_inference,
+    z_lr=z_lr,
+    z_it=z_it,
     variances=1.0,
     constrained=True,
     rho=rho,

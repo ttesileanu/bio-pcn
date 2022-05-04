@@ -45,8 +45,8 @@ torch.manual_seed(123)
 
 net = PCNetwork(
     dims,
-    lr_inference=z_lr,
-    it_inference=z_it,
+    z_lr=z_lr,
+    z_it=z_it,
     constrained=True,
     rho=rho,
     fast_optimizer=torch.optim.Adam,

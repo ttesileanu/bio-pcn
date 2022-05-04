@@ -16,8 +16,8 @@ class PCNetwork(object):
         self,
         dims: Sequence,
         activation: Union[Sequence, Callable] = torch.tanh,
-        it_inference: int = 100,
-        lr_inference: float = 0.2,
+        z_it: int = 100,
+        z_lr: float = 0.2,
         variances: Union[Sequence, float] = 1.0,
         constrained: bool = False,
         rho: Union[Sequence, float] = 0.0,
@@ -28,8 +28,8 @@ class PCNetwork(object):
 
         :param dims: number of units in each layer
         :param activation: activation function(s) to use for each layer
-        :param it_inference: number of iterations per inference step
-        :param lr_inference: learning rate for inference step
+        :param z_it: number of iterations per inference step
+        :param z_lr: learning rate for inference step
         :param variances: variance(s) to use for each layer after the first
         :param constrained: if true, use an inequality constraint,
             cov_matrix(z) <= rho * identity_matrix
@@ -49,8 +49,8 @@ class PCNetwork(object):
 
         assert len(self.activation) == len(self.dims) - 1
 
-        self.it_inference = it_inference
-        self.lr_inference = lr_inference
+        self.z_it = z_it
+        self.z_lr = z_lr
         self.variances = torch.from_numpy(
             np.copy(variances)
             if np.size(variances) > 1
@@ -72,12 +72,12 @@ class PCNetwork(object):
             for i in range(len(self.dims) - 1)
         ]
         if self.bias:
-            self.b = [
+            self.h = [
                 torch.zeros(self.dims[i + 1], requires_grad=True)
                 for i in range(len(self.dims) - 1)
             ]
         else:
-            self.b = []
+            self.h = []
         for W in self.W:
             nn.init.xavier_uniform_(W)
             W.requires_grad = True
@@ -117,7 +117,7 @@ class PCNetwork(object):
             x = self.activation[i](x)
 
             if self.bias:
-                x = x @ self.W[i].T + self.b[i]
+                x = x @ self.W[i].T + self.h[i]
             else:
                 x = x @ self.W[i].T
 
@@ -134,9 +134,9 @@ class PCNetwork(object):
     ) -> SimpleNamespace:
         """Do a forward pass where both input and output values are fixed.
 
-        This runs a number of iterations (as set by `self.it_inference`) of the fast
-        optimizer, starting with an initialization where the input is propagated forward
-        without an output constraint (using `self.forward`).
+        This runs a number of iterations (as set by `self.z_it`) of the fast optimizer,
+        starting with an initialization where the input is propagated forward without an
+        output constraint (using `self.forward`).
 
         :param x: input sample
         :param y: output sample
@@ -168,29 +168,25 @@ class PCNetwork(object):
             x.requires_grad = True
 
         # create an optimizer for the fast parameters
-        fast_optimizer = self.fast_optimizer(
-            self.fast_parameters(), lr=self.lr_inference
-        )
+        fast_optimizer = self.fast_optimizer(self.fast_parameters(), lr=self.z_lr)
 
         # ensure we're not calculating unneeded gradients
         # this improves speed by about 15% in the Whittington&Bogacz XOR example
         if self.bias:
-            for W, b in zip(self.W, self.b):
+            for W, h in zip(self.W, self.h):
                 W.requires_grad = False
-                b.requires_grad = False
+                h.requires_grad = False
         else:
             for W in self.W:
                 W.requires_grad = False
 
         if latent_profile:
             batch_size = x.shape[0] if x.ndim > 1 else 1
-            latent = [
-                torch.zeros((self.it_inference, batch_size, dim)) for dim in self.dims
-            ]
+            latent = [torch.zeros((self.z_it, batch_size, dim)) for dim in self.dims]
 
         # iterate until convergence
-        losses = torch.zeros(self.it_inference)
-        for i in range(self.it_inference):
+        losses = torch.zeros(self.z_it)
+        for i in range(self.z_it):
             # this is about 10% faster than fast_optimizer.zero_grad()
             for param in self.fast_parameters():
                 param.grad = None
@@ -208,9 +204,9 @@ class PCNetwork(object):
 
         # reset requires_grad
         if self.bias:
-            for W, b in zip(self.W, self.b):
+            for W, h in zip(self.W, self.h):
                 W.requires_grad = True
-                b.requires_grad = True
+                h.requires_grad = True
         else:
             for W in self.W:
                 W.requires_grad = True
@@ -252,7 +248,7 @@ class PCNetwork(object):
                 loss += constraint0 / self.variances[i - 1]
 
             if self.bias:
-                x_pred = x_pred @ self.W[i].T + self.b[i]
+                x_pred = x_pred @ self.W[i].T + self.h[i]
             else:
                 x_pred = x_pred @ self.W[i].T
 
@@ -311,7 +307,7 @@ class PCNetwork(object):
             for i in range(len(self.W)):
                 self.W[i] = self.W[i].to(*args, **kwargs).requires_grad_()
                 if self.bias:
-                    self.b[i] = self.b[i].to(*args, **kwargs).requires_grad_()
+                    self.h[i] = self.h[i].to(*args, **kwargs).requires_grad_()
 
             for i in range(len(self.z)):
                 self.z[i] = self.z[i].to(*args, **kwargs)
@@ -330,7 +326,7 @@ class PCNetwork(object):
         params = self.W
 
         if self.bias:
-            params.extend(self.b)
+            params.extend(self.h)
         if self.constrained:
             params.extend(self.Q)
 
@@ -350,7 +346,7 @@ class PCNetwork(object):
         if self.constrained:
             groups.append({"name": "Q", "params": self.Q})
         if self.bias:
-            groups.append({"name": "b", "params": self.b})
+            groups.append({"name": "h", "params": self.h})
 
         return groups
 
@@ -379,8 +375,8 @@ class PCNetwork(object):
             f"activation={repr(self.activation)}, "
             f"bias={str(self.bias)}, "
             f"constrained={self.constrained}, "
-            f"it_inference={self.it_inference}, "
-            f"lr_inference={self.lr_inference}, "
+            f"z_it={self.z_it}, "
+            f"z_lr={self.z_lr}, "
             f"variances={self.variances}"
             f")"
         )
