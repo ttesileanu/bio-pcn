@@ -355,7 +355,7 @@ def test_training_with_batches_of_nontrivial_size():
     lr = 1e-4
     z_it = 10
 
-    n_samples = 50
+    n_samples = 5
 
     torch.manual_seed(seed)
     x = torch.normal(0, 1, size=(n_samples, dims[0]))
@@ -366,8 +366,8 @@ def test_training_with_batches_of_nontrivial_size():
     kwargs = {"variances": variances, "z_it": z_it}
     net = PCNetwork(dims, **kwargs)
 
-    # gradients are averaged over batch samples by default, equivalent to lower lr when
-    # training sample by sample
+    # gradients are averaged over batch samples by default, *almost* equivalent to lower
+    # lr when training sample by sample
     optimizer = torch.optim.SGD(net.slow_parameters(), lr=lr / n_samples)
     for crt_x, crt_y in zip(x, y):
         net.relax(crt_x, crt_y)

@@ -170,46 +170,24 @@ class PCNetwork(object):
         # create an optimizer for the fast parameters
         fast_optimizer = self.fast_optimizer(self.fast_parameters(), lr=self.z_lr)
 
-        # ensure we're not calculating unneeded gradients
-        # this improves speed by about 15% in the Whittington&Bogacz XOR example
-        if self.bias:
-            for W, h in zip(self.W, self.h):
-                W.requires_grad = False
-                h.requires_grad = False
-        else:
-            for W in self.W:
-                W.requires_grad = False
-
         if latent_profile:
             batch_size = x.shape[0] if x.ndim > 1 else 1
             latent = [torch.zeros((self.z_it, batch_size, dim)) for dim in self.dims]
 
         # iterate until convergence
-        losses = torch.zeros(self.z_it)
+        if pc_loss_profile:
+            losses = torch.zeros(self.z_it)
         for i in range(self.z_it):
-            # this is about 10% faster than fast_optimizer.zero_grad()
-            for param in self.fast_parameters():
-                param.grad = None
+            self.calculate_z_grad()
 
-            loss = self.loss()
-            loss.backward()
+            if pc_loss_profile:
+                losses[i] = self.pc_loss().item()
 
             fast_optimizer.step()
-
-            losses[i] = loss.item()
 
             if latent_profile:
                 for k, crt_z in enumerate(self.z):
                     latent[k][i, :, :] = crt_z
-
-        # reset requires_grad
-        if self.bias:
-            for W, h in zip(self.W, self.h):
-                W.requires_grad = True
-                h.requires_grad = True
-        else:
-            for W in self.W:
-                W.requires_grad = True
 
         ns = SimpleNamespace()
         if pc_loss_profile:
@@ -270,6 +248,48 @@ class PCNetwork(object):
         mostly useful for consistency with CPCN classes.
         """
         return self.loss(ignore_constraint=True)
+
+    def calculate_z_grad(self):
+        """Calculate gradients for fast (z) variables.
+        
+        These gradients follow from backprop on `self.loss()`, but this manual
+        implementation is more consistent with what we do for BioPCN, and is also
+        significantly faster in this case.
+        """
+        # calculate activations and derivatives
+        fz = []
+        fz_der = []
+        for i in range(len(self.dims) - 1):
+            f = self.activation[i]
+
+            z = self.z[i].detach().requires_grad_()
+            crt_fz = f(z)
+            crt_fz_der = torch.autograd.grad(
+                crt_fz, z, grad_outputs=torch.ones_like(z), create_graph=True
+            )[0]
+
+            fz.append(crt_fz)
+            fz_der.append(crt_fz_der)
+
+        # calculate error nodes
+        eps = []
+        for i in range(1, len(self.dims)):
+            mu = fz[i - 1] @ self.W[i - 1].T
+            if self.bias:
+                mu += self.h[i - 1]
+
+            eps.append((self.z[i] - mu) / self.variances[i - 1])
+
+        # calculate the gradients
+        for i in range(1, len(self.dims) - 1):
+            grad0 = eps[i - 1] - fz_der[i] * (eps[i] @ self.W[i])
+            if self.constrained:
+                v = self.variances[i - 1]
+                grad0 += fz_der[i] * (fz[i] @ self.Q[i - 1].T @ self.Q[i - 1]) / v
+
+            if grad0.ndim == self.z[i].ndim + 1:
+                grad0 = grad0.mean(dim=0)
+            self.z[i].grad = grad0
 
     def calculate_weight_grad(self, reduction: str = "mean"):
         """Calculate gradients for slow (weight) variables.
