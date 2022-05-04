@@ -8,7 +8,7 @@ import seaborn as sns
 import torch
 
 from types import SimpleNamespace
-from typing import Optional
+from typing import Optional, Tuple
 
 
 def show_constraint_diagnostics(
@@ -82,45 +82,108 @@ def show_constraint_diagnostics(
     return fig
 
 
-def show_learning_curves(results: SimpleNamespace) -> plt.Figure:
+def show_learning_curves(
+    results: SimpleNamespace,
+    axs: Optional[Tuple[plt.Axes]] = None,
+    show_train: bool = True,
+    show_val: bool = True,
+    annotate_val: bool = True,
+    labels: Tuple[str] = ("train", "val"),
+    colors: Tuple[str] = ("C0", "C1"),
+    plot_kwargs: Optional[dict] = None,
+) -> plt.Figure:
     """Make plot of predictive-coding loss and classification error rate.
     
     :param results: namespace of results, containing dictionaries `"train"` and
         `"validation"`
+    :param axs: tuple of axes in which to make the plots, `(ax_loss, ax_acc)`
+    :param show_train: whether to plot the training results
+    :param show_val: whether to plot the validation results
+    :param annotate_final: whether to annotate the final value
+    :param labels: how to label the curves
+    :param colors: how to color the curves
+    :param plot_kwargs: keyword arguments to pass to plot
     :return: the Matplotlib figure that is created
     """
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 3), constrained_layout=True)
+    # handle defaults
+    if axs is None:
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4), constrained_layout=True)
+    else:
+        ax1, ax2 = axs
+        fig = ax1.get_figure()
 
-    ax1.plot(results.train["batch"], results.train["pc_loss"], label="train")
-    ax1.plot(results.validation["batch"], results.validation["pc_loss"], label="val")
+    if plot_kwargs is None:
+        plot_kwargs = {"alpha": 0.7, "lw": 1.0}
+    else:
+        plot_kwargs.setdefault("alpha", 0.7)
+        if "linewidth" not in plot_kwargs and "lw" not in plot_kwargs:
+            plot_kwargs.setdefault("lw", 1.0)
+
+    if show_train:
+        ax1.plot(
+            results.train["batch"],
+            results.train["pc_loss"],
+            label=labels[0],
+            c=colors[0],
+            **plot_kwargs,
+        )
+
+    if show_val:
+        ax1.plot(
+            results.validation["batch"],
+            results.validation["pc_loss"],
+            label=labels[1],
+            c=colors[1],
+            **plot_kwargs,
+        )
+        if annotate_val:
+            ax1.annotate(
+                f"{results.validation['pc_loss'][-1]:.2g}",
+                (results.validation["batch"][-1], results.validation["pc_loss"][-1]),
+                xytext=(3, 0),
+                textcoords="offset points",
+                c=colors[1],
+                va="center",
+                fontweight="bold",
+            )
+
     ax1.legend(frameon=False)
-    ax1.annotate(
-        f"{results.validation['pc_loss'][-1]:.2g}",
-        (results.validation["batch"][-1], results.validation["pc_loss"][-1]),
-        xytext=(3, 0),
-        textcoords="offset points",
-        c="C1",
-        va="center",
-        fontweight="bold",
-    )
     ax1.set_yscale("log")
     ax1.set_xlabel("batch")
     ax1.set_ylabel("predictive-coding loss")
 
-    train_error_rate = 100 * (1.0 - results.train["accuracy"])
     val_error_rate = 100 * (1.0 - results.validation["accuracy"])
-    ax2.plot(results.train["batch"], train_error_rate, label="train")
-    ax2.plot(results.validation["batch"], val_error_rate, label="val")
+
+    if show_train:
+        train_error_rate = 100 * (1.0 - results.train["accuracy"])
+        ax2.plot(
+            results.train["batch"],
+            train_error_rate,
+            label=labels[0],
+            c=colors[0],
+            **plot_kwargs,
+        )
+
+    if show_val:
+        ax2.plot(
+            results.validation["batch"],
+            val_error_rate,
+            label=labels[1],
+            c=colors[1],
+            **plot_kwargs,
+        )
+        if annotate_val:
+            ax2.annotate(
+                f"{val_error_rate[-1]:.1f}%",
+                (results.validation["batch"][-1], val_error_rate[-1]),
+                xytext=(3, 0),
+                textcoords="offset points",
+                c=colors[0],
+                va="center",
+                fontweight="bold",
+            )
+
     ax2.legend(frameon=False)
-    ax2.annotate(
-        f"{val_error_rate[-1]:.1f}%",
-        (results.validation["batch"][-1], val_error_rate[-1]),
-        xytext=(3, 0),
-        textcoords="offset points",
-        c="C1",
-        va="center",
-        fontweight="bold",
-    )
     ax2.set_ylim(0, None)
     ax2.set_xlabel("batch")
     ax2.set_ylabel("error rate (%)")
