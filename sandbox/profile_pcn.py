@@ -27,6 +27,7 @@ torch.manual_seed(123)
 
 net = PCNetwork(
     dims,
+    activation=lambda _: _,
     lr_inference=z_lr,
     it_inference=z_it,
     constrained=True,
