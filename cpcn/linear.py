@@ -1,4 +1,4 @@
-""" Define the linear constrained-predictive coding network. """
+"""Define the linear constrained-predictive coding network."""
 
 from types import SimpleNamespace
 from typing import Sequence, Union, Optional, Callable
@@ -426,7 +426,7 @@ class LinearBioPCN:
         return self.z[1:-1]
 
     def slow_parameters(self) -> list:
-        """ Create list of parameters to optimize in the slow phase.
+        """Create list of parameters to optimize in the slow phase.
 
         These are the weights and biases.
         """
@@ -460,7 +460,7 @@ class LinearBioPCN:
         return groups
 
     def to(self, *args, **kwargs):
-        """ Moves and/or casts the parameters and buffers. """
+        """Moves and/or casts the parameters and buffers."""
         with torch.no_grad():
             for i in range(len(self.W_a)):
                 self.W_a[i] = self.W_a[i].to(*args, **kwargs).requires_grad_()
@@ -483,11 +483,11 @@ class LinearBioPCN:
         return self
 
     def train(self):
-        """ Set in training mode. """
+        """Set in training mode."""
         self.training = True
 
     def eval(self):
-        """ Set in evaluation mode. """
+        """Set in evaluation mode."""
         self.training = False
 
     def _get_weight_init_fct(self, init_scale_type: str):

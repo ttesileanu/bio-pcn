@@ -1,4 +1,4 @@
-""" Implement the predictive-coding network from Whittington & Bogacz. """
+"""Implement the predictive-coding network from Whittington & Bogacz."""
 
 from types import SimpleNamespace
 from typing import Sequence, Union, Callable
@@ -10,7 +10,7 @@ import numpy as np
 
 
 class PCNetwork(object):
-    """ An implementation of the predictive coding network from Whittington&Bogacz. """
+    """An implementation of the predictive coding network from Whittington&Bogacz."""
 
     def __init__(
         self,
@@ -24,7 +24,7 @@ class PCNetwork(object):
         bias: bool = True,
         fast_optimizer: Callable = torch.optim.Adam,
     ):
-        """ Initialize the network.
+        """Initialize the network.
 
         :param dims: number of units in each layer
         :param activation: activation function(s) to use for each layer
@@ -94,7 +94,7 @@ class PCNetwork(object):
         self.z = [torch.zeros(dim) for dim in self.dims]
 
     def forward(self, x: torch.Tensor, inplace: bool = True) -> torch.Tensor:
-        """ Do a forward pass with unconstrained output.
+        """Do a forward pass with unconstrained output.
 
         This sets each layer's variables to the most likely values given the previous
         layer values. This ends up being the same as a vanilla artificial neural net.
@@ -132,7 +132,7 @@ class PCNetwork(object):
         pc_loss_profile: bool = False,
         latent_profile: bool = False,
     ) -> SimpleNamespace:
-        """ Do a forward pass where both input and output values are fixed.
+        """Do a forward pass where both input and output values are fixed.
 
         This runs a number of iterations (as set by `self.it_inference`) of the fast
         optimizer, starting with an initialization where the input is propagated forward
@@ -161,7 +161,6 @@ class PCNetwork(object):
             self.forward(x)
 
         # fix the output layer values
-        # noinspection PyTypeChecker
         self.z[-1] = y
 
         # ensure the variables in the hidden layers require grad
@@ -227,7 +226,7 @@ class PCNetwork(object):
     def loss(
         self, reduction: str = "mean", ignore_constraint: bool = False
     ) -> torch.Tensor:
-        """ Calculate the loss given the current values of the random variables.
+        """Calculate the loss given the current values of the random variables.
         
         :param reduction: reduction to apply to the output: `"none" | "mean" | "sum"`
         :param ignore_constraint: if true, the constraint term is not included even if
@@ -258,7 +257,6 @@ class PCNetwork(object):
                 x_pred = x_pred @ self.W[i].T
 
             x = self.z[i + 1]
-            # noinspection PyUnresolvedReferences
             loss += ((x - x_pred) ** 2).sum(dim=-1) / self.variances[i]
 
         if reduction == "sum":
@@ -272,7 +270,7 @@ class PCNetwork(object):
         return loss
 
     def pc_loss(self) -> torch.Tensor:
-        """ An alias of `self.loss()` with `ignore_constraint` set to true. This is
+        """An alias of `self.loss()` with `ignore_constraint` set to true. This is
         mostly useful for consistency with CPCN classes.
         """
         return self.loss(ignore_constraint=True)
@@ -300,15 +298,15 @@ class PCNetwork(object):
                 Q.grad = -Q.grad
 
     def train(self):
-        """ Set in training mode. """
+        """Set in training mode."""
         self.training = True
 
     def eval(self):
-        """ Set in evaluation mode. """
+        """Set in evaluation mode."""
         self.training = False
 
     def to(self, *args, **kwargs):
-        """ Moves and/or casts the parameters and buffers. """
+        """Moves and/or casts the parameters and buffers."""
         with torch.no_grad():
             for i in range(len(self.W)):
                 self.W[i] = self.W[i].to(*args, **kwargs).requires_grad_()
@@ -325,7 +323,7 @@ class PCNetwork(object):
         return self
 
     def slow_parameters(self) -> list:
-        """ Create list of parameters to optimize in the slow phase.
+        """Create list of parameters to optimize in the slow phase.
 
         These are the weights and biases.
         """
@@ -357,7 +355,7 @@ class PCNetwork(object):
         return groups
 
     def fast_parameters(self) -> list:
-        """ Create list of parameters to optimize in the fast phase.
+        """Create list of parameters to optimize in the fast phase.
 
         These are the random variables in all but the input and output layers.
         """
