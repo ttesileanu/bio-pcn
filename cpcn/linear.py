@@ -438,6 +438,27 @@ class LinearBioPCN:
 
         return res
 
+    def slow_parameter_groups(self) -> list:
+        """Create list of parameter groups to optimize in the slow phase.
+        
+        This is meant to allow for different learning rates for different parameters.
+        The returned list is in the format accepted by optimizers -- a list of
+        dictionaries, each of which contains `"params"` (an iterable of tensors in the
+        group). Each dictionary also contains a `"name"` -- a string identifying the
+        parameters.
+        """
+        groups = []
+        groups.append({"name": "W_a", "params": self.W_a})
+        groups.append({"name": "W_b", "params": self.W_b})
+        groups.append({"name": "Q", "params": self.Q})
+        groups.append({"name": "M", "params": self.M})
+        if self.bias_a:
+            groups.append({"name": "h_a", "params": self.h_a})
+        if self.bias_b:
+            groups.append({"name": "h_b", "params": self.h_b})
+
+        return groups
+
     def to(self, *args, **kwargs):
         """ Moves and/or casts the parameters and buffers. """
         with torch.no_grad():

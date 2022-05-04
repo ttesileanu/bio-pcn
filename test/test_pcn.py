@@ -785,3 +785,54 @@ def test_z_dynamics_uses_correct_sign_for_constraint(net_constraint):
 
         expected = grad1 - grad2 + grad3
         assert torch.allclose(expected, grad_z[i - 1])
+
+
+def test_slow_parameter_groups_is_iterable_of_dicts_each_with_params_member(net):
+    param_groups = net.slow_parameter_groups()
+    for d in param_groups:
+        assert "params" in d
+
+
+def test_slow_parameter_groups_returns_dicts_with_name_key(net):
+    param_groups = net.slow_parameter_groups()
+    for d in param_groups:
+        assert "name" in d
+
+
+def test_slow_parameter_groups_lists_the_same_parameters_as_slow_parameters(net):
+    params1 = set(net.slow_parameters())
+    params2 = set(sum([_["params"] for _ in net.slow_parameter_groups()], []))
+
+    for x in params1:
+        assert x in params2, "element of params missing from param_groups"
+    for x in params2:
+        assert x in params1, "element of param_groups missing from params"
+
+
+@pytest.mark.parametrize("var", ["W", "b"])
+def test_slow_parameter_groups_contains_expected_names(net, var):
+    params = net.slow_parameter_groups()
+    names = [_["name"] for _ in params]
+
+    assert var in names
+
+
+def test_slow_parameters_no_bias(net_nb):
+    params = net_nb.slow_parameter_groups()
+    names = [_["name"] for _ in params]
+
+    assert "b" not in names
+
+
+def test_slow_parameters_constraint(net_constraint):
+    params = net_constraint.slow_parameter_groups()
+    names = [_["name"] for _ in params]
+
+    assert "Q" in names
+
+
+def test_slow_parameters_no_constraint(net):
+    params = net.slow_parameter_groups()
+    names = [_["name"] for _ in params]
+
+    assert "Q" not in names

@@ -338,6 +338,24 @@ class PCNetwork(object):
 
         return params
 
+    def slow_parameter_groups(self) -> list:
+        """Create list of parameter groups to optimize in the slow phase.
+        
+        This is meant to allow for different learning rates for different parameters.
+        The returned list is in the format accepted by optimizers -- a list of
+        dictionaries, each of which contains `"params"` (an iterable of tensors in the
+        group). Each dictionary also contains a `"name"` -- a string identifying the
+        parameters.
+        """
+        groups = []
+        groups.append({"name": "W", "params": self.W})
+        if self.constrained:
+            groups.append({"name": "Q", "params": self.Q})
+        if self.bias:
+            groups.append({"name": "b", "params": self.b})
+
+        return groups
+
     def fast_parameters(self) -> list:
         """ Create list of parameters to optimize in the fast phase.
 

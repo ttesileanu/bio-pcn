@@ -1137,3 +1137,49 @@ def test_initial_param_scale_xavier(var):
     tol = 4 / np.sqrt(n_elem)
 
     assert sigma == pytest.approx(expected, rel=tol)
+
+
+def test_slow_parameter_groups_is_iterable_of_dicts_each_with_params_member(net):
+    param_groups = net.slow_parameter_groups()
+    for d in param_groups:
+        assert "params" in d
+
+
+def test_slow_parameter_groups_returns_dicts_with_name_key(net):
+    param_groups = net.slow_parameter_groups()
+    for d in param_groups:
+        assert "name" in d
+
+
+def test_slow_parameter_groups_lists_the_same_parameters_as_slow_parameters(net):
+    params1 = set(net.slow_parameters())
+    params2 = set(sum([_["params"] for _ in net.slow_parameter_groups()], []))
+
+    for x in params1:
+        assert x in params2, "element of params missing from param_groups"
+    for x in params2:
+        assert x in params1, "element of param_groups missing from params"
+
+
+@pytest.mark.parametrize("var", ["W_a", "W_b", "Q", "M", "h_a", "h_b"])
+def test_slow_parameter_groups_contains_expected_names(net, var):
+    params = net.slow_parameter_groups()
+    names = [_["name"] for _ in params]
+
+    assert var in names
+
+
+def test_slow_parameters_no_bias_a(net_no_bias_a):
+    params = net_no_bias_a.slow_parameter_groups()
+    names = [_["name"] for _ in params]
+
+    assert "h_a" not in names
+    assert "h_b" in names
+
+
+def test_slow_parameters_no_bias_b(net_no_bias_b):
+    params = net_no_bias_b.slow_parameter_groups()
+    names = [_["name"] for _ in params]
+
+    assert "h_b" not in names
+    assert "h_a" in names
