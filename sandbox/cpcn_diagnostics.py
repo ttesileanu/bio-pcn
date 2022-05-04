@@ -36,8 +36,8 @@ dims = [784, 5, 10]
 
 z_it = 80
 z_lr = 0.1
-rho = 0.015
-# rho = 0.0012
+# rho = 0.015
+rho = 0.0012
 
 torch.manual_seed(123)
 
@@ -80,6 +80,8 @@ trainer.set_optimizer(torch.optim.Adam, lr=initial_lr)
 #     ),
 #     every=1,
 # )
+
+trainer.set_lr_factor("Q", 10.0)
 
 trainer.peek("weight", ["W_a", "W_b", "Q", "M"], every=10)
 trainer.peek_sample("latent", ["z"])
