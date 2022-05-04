@@ -5,7 +5,7 @@ import torchvision
 import numpy as np
 
 from types import SimpleNamespace
-from typing import Optional, Callable, Iterable, Union
+from typing import Optional, Callable, Iterable, Union, Sequence
 
 
 def make_onehot(y) -> torch.Tensor:
@@ -138,3 +138,68 @@ def hierarchical_get(obj, attr: str):
             return obj
         else:
             attr = parts[1]
+
+
+def get_constraint_diagnostics(
+    latent: dict, every: int = 10, rho: Union[Sequence, float] = 1.0, var: str = "z"
+) -> dict:
+    """Calculate diagnostics for the inequality constraint on the `z` covariance
+    matrices.
+
+    The inequality constraint is
+        <z z.T> <= rho * identity ,
+    where `<.>` is the average over samples and `rho` is a scale parameter.
+
+    :param latent: dictionary containing the evolution of the latent variables; should
+        contain members `"batch"` and `"z:?"`, where `?` is an integer ranging from 0 to
+        the number of layers; the name of the variable can be changed from `"z"` by
+        using the `var` argument (see below)
+    :param every: how many batches between covariance estimates; all the recorded
+        batches between estimates are used to calculate the covariance `<z z.T>`
+    :param rho: scale parameter used in the constraint (see above)
+    :param var: name of the latent variable to use instead of `"z"`
+    :return: dictionary with keys `"batch"` (the middle of the range where the
+        covariance matrix is estimated); `"cov:?"` (the covariance matrix for each
+        layer); `"trace:?"` (the trace of the constraint `<z z.T> - rho * identity` for
+        each layer); `"evals:?"` (eigenvalues of the covariance matrix, as obtained by
+        `eigh`, for each layer); `"max_eval:?"` (maximum eigenvalue for each layer)
+    """
+    n_batch = torch.max(latent["batch"]).item()
+    n_cov = n_batch // every
+
+    res = {"batch": torch.arange(n_cov) * every}
+    for key, value in latent.items():
+        parts = key.split(":")
+        if len(parts) < 1 or parts[0] != var:
+            continue
+
+        layer = parts[1]
+
+        size = value.shape[-1]
+        crt_cov = torch.zeros((n_cov, size, size))
+        for i in range(n_cov):
+            crt_start = i * every
+            crt_end = (i + 1) * every
+            crt_sel = (crt_start <= latent["batch"]) & (latent["batch"] < crt_end)
+            crt_z = value[crt_sel]
+
+            crt_cov[i] = crt_z.T @ crt_z / len(crt_z)
+
+        cov_name = "cov:" + layer
+        res[cov_name] = crt_cov
+
+        if hasattr(rho, "__getitem__"):
+            crt_rho = rho[int(layer)]
+        else:
+            crt_rho = rho
+        res["trace:" + layer] = torch.FloatTensor(
+            [torch.trace(crt_cov[i] - crt_rho * torch.eye(size)) for i in range(n_cov)]
+        )
+
+        crt_all_evals = torch.stack([torch.linalg.eigh(_)[0] for _ in crt_cov])
+        crt_max_eval = crt_all_evals.max(dim=-1)[0]
+
+        res["evals:" + layer] = crt_all_evals
+        res["max_eval:" + layer] = crt_max_eval
+
+    return res
