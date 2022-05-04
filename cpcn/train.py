@@ -39,6 +39,7 @@ class Trainer:
         `peek...` functions
     :param schedulers: list of tuples `(scheduler, condition)` of learning-rate
         scheduler constructors and the conditions under which they should be called
+    :param lr_factors: dictionary of learning-rate scaling factors
     """
 
     def __init__(self, net, train_loader: Iterable, validation_loader: Iterable):
@@ -54,6 +55,7 @@ class Trainer:
 
         self.optimizer_class = torch.optim.Adam
         self.optimizer_kwargs = {}
+        self.lr_factors = {}
 
         self.accuracy_fct = one_hot_accuracy
 
@@ -189,9 +191,22 @@ class Trainer:
         self,
     ) -> Tuple[torch.optim.Optimizer, Optional[torch.optim.Optimizer]]:
         """Set up optimizers for the main network and for the classifier, if any."""
-        optimizer = self.optimizer_class(
-            self.net.slow_parameters(), **self.optimizer_kwargs
-        )
+        if len(self.lr_factors) == 0:
+            optimizer = self.optimizer_class(
+                self.net.slow_parameters(), **self.optimizer_kwargs
+            )
+        else:
+            # use per-group learning rate scaling factors
+            param_groups = self.net.slow_parameter_groups()
+
+            # slightly annoying bit: if default learning rate is used, we can't read it
+            # from `self.optimizer_kwargs`; so we first create an optimizer with all
+            # the relevant groups, but the same learning rate for all
+            optimizer = self.optimizer_class(param_groups, **self.optimizer_kwargs)
+            for param in optimizer.param_groups:
+                if param["name"] in self.lr_factors:
+                    param["lr"] *= self.lr_factors[param["name"]]
+
         if self.classifier is not None:
             if self.classifier_criterion is None:
                 self.classifier_criterion = torch.nn.MSELoss()
@@ -463,6 +478,21 @@ class Trainer:
         is prediction.
         """
         self.accuracy_fct = accuracy_fct
+        return self
+
+    def set_lr_factor(self, params: Union[Sequence, str], factor: float) -> "Trainer":
+        """Set a scaling factor for the learning rate of a particular parameter group.
+        
+        :param params: name of a single set of parameters, or iterable of such names;
+            this must match the names returned from `net.slow_parameter_groups()`
+        :param factor: learning-rate factor
+        """
+        if isinstance(params, str):
+            params = [params]
+
+        for param in params:
+            self.lr_factors[param] = factor
+
         return self
 
     def set_classifier_optimizer(
