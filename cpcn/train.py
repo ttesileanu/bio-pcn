@@ -24,9 +24,7 @@ class Trainer:
         `accuracy_fct(y, y_pred)`, where `y` is ground truth, `y_pred` is prediction
     :param classifier: this can be a trainable neural network used to predict the output
         samples from the `dim`th layer of `net` after a call to `net.forward()`; it can
-        also be the string "linear", in which case a linear layer of appropriate input
-        and ouptut dimensions is used; if it is not provided (or set to `None`), the
-        output from `net.forward()` is used
+        also be a string or `None` -- see `set_classifier()`
     :param classifier_optim_class: callable to create the optimizer for the classifier
     :param classifier_optim_kwargs: keyword arguments to pass to `classifier_optim()`
     :param classifier_criterion: objective fucntion for training classifier; default:
@@ -375,8 +373,13 @@ class Trainer:
         This can be a trainable neural network used to predict the output samples from
         the `classifier_dim`th layer of `net` after a call to `net.forward()`.
         
-        It can also be the string "linear", in which case a linear layer of appropriate
-        input and ouptut dimensions is used.
+        It can also be a string:
+        * "linear": a linear layer of appropriate input and ouptut dimensions;
+        * "linear_softmax": linear layer followed by softmax;
+        * "linear_relu": linear layer followed by relu.
+        * "mlp": a neural net with one hidden layer, with the same size as the output
+            layer; the nonlinearity after the hidden layer is ReLU, and the output
+            nonlinearity is softmax
         
         You can also set it to `None`, in which case the output from `net.forward()` is
         used.
@@ -386,21 +389,41 @@ class Trainer:
         """
         self.classifier = classifier
         if isinstance(self.classifier, str):
-            if self.classifier == "linear":
+            if self.classifier in ["linear", "linear_softmax", "linear_relu"]:
                 if hasattr(self.net, "dims"):
                     dims = self.net.dims
                 else:
                     dims = self.net.pyr_dims
-                self.classifier = torch.nn.Sequential(
-                    OrderedDict(
-                        [
-                            (
-                                "linear",
-                                torch.nn.Linear(dims[self.classifier_dim], dims[-1]),
-                            )
-                        ]
+                linear = torch.nn.Linear(dims[self.classifier_dim], dims[-1])
+                if self.classifier == "linear":
+                    layers = OrderedDict([("linear", linear)])
+                elif self.classifier == "linear_softmax":
+                    layers = OrderedDict(
+                        [("linear", linear), ("softmax", torch.nn.Softmax(1))]
                     )
+                elif self.classifier == "linear_relu":
+                    layers = OrderedDict(
+                        [("linear", linear), ("relu", torch.nn.ReLU(1))]
+                    )
+                self.classifier = torch.nn.Sequential(layers)
+            elif self.classifier == "mlp":
+                if hasattr(self.net, "dims"):
+                    dims = self.net.dims
+                else:
+                    dims = self.net.pyr_dims
+
+                n_in = dims[self.classifier_dim]
+                n_out = dims[-1]
+
+                layers = OrderedDict(
+                    [
+                        ("linear", torch.nn.Linear(n_in, n_out)),
+                        ("relu", torch.nn.ReLU()),
+                        ("full", torch.nn.Linear(n_out, n_out)),
+                        ("softmax", torch.nn.Softmax(dim=1)),
+                    ]
                 )
+                self.classifier = torch.nn.Sequential(layers)
             else:
                 raise ValueError("Invalid classifier type")
 
