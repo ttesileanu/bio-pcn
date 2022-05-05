@@ -55,10 +55,10 @@ class PCNetwork(object):
             np.copy(variances)
             if np.size(variances) > 1
             else np.repeat(variances, len(self.dims) - 1)
-        )
+        ).float()
         self.rho = torch.from_numpy(
-            np.copy(rho) if np.size(rho) > 1 else np.repeat(rho, len(self.dims) - 1)
-        )
+            np.copy(rho) if np.size(rho) > 1 else np.repeat(rho, len(self.dims) - 2)
+        ).float()
         self.constrained = constrained
         self.bias = bias
         self.fast_optimizer = fast_optimizer
