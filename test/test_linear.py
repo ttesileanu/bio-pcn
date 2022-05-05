@@ -1183,3 +1183,169 @@ def test_slow_parameters_no_bias_b(net_no_bias_b):
 
     assert "h_b" not in names
     assert "h_a" in names
+
+
+def test_from_pcn_with_match_weights():
+    torch.manual_seed(2)
+
+    dims = [2, 4, 3, 7, 3]
+    variances = [0.5, 1.2, 0.7, 0.3]
+
+    pcn = PCNetwork(dims, variances=variances, activation=lambda _: _)
+    cpcn = LinearBioPCN.from_pcn(pcn, match_weights=True)
+
+    # pass some data through the network to set the neural activities
+    pcn.relax(torch.FloatTensor([-0.3, 0.2]), torch.FloatTensor([0.4, -0.2, 0.5]))
+
+    # copy the neural activations over to CPCN
+    for i in range(len(dims)):
+        cpcn.z[i] = pcn.z[i].clone().detach()
+
+    # now calculate and compare loss
+    pcn_loss = pcn.loss().item()
+    cpcn_loss = cpcn.pc_loss().item()
+
+    assert pcn_loss == pytest.approx(cpcn_loss)
+
+
+def test_from_pcn_without_match_weights():
+    torch.manual_seed(2)
+
+    dims = [2, 4, 3, 7, 3]
+    variances = [0.5, 1.2, 0.7, 0.3]
+
+    pcn = PCNetwork(dims, variances=variances, activation=lambda _: _)
+    cpcn = LinearBioPCN.from_pcn(pcn)
+
+    # ensure weights differ
+    for i in range(len(dims) - 2):
+        assert torch.max(torch.abs(cpcn.W_a[i] - pcn.W[i + 1])) > 0.01
+        assert torch.max(torch.abs(cpcn.W_b[i] - pcn.W[i])) > 0.01
+
+
+def test_from_pcn_raises_if_nontrivial_activation():
+    pcn = PCNetwork([2, 5, 10], activation=torch.tanh)
+    with pytest.raises(ValueError):
+        LinearBioPCN.from_pcn(pcn)
+
+
+def test_from_pcn_does_not_raise_if_nontrival_activation_but_copy_activation_false():
+    pcn = PCNetwork([2, 5, 10], activation=torch.tanh)
+    LinearBioPCN.from_pcn(pcn, check_activation=False)
+
+
+def test_from_pcn_copies_over_Q_for_constrained_pcn_if_match_weights_is_true():
+    torch.manual_seed(3)
+
+    dims = [2, 4, 3, 8]
+
+    pcn = PCNetwork(dims, activation=lambda _: _, constrained=True)
+    cpcn = LinearBioPCN.from_pcn(pcn, match_weights=True)
+
+    for i in range(len(dims) - 2):
+        assert torch.allclose(cpcn.Q[i], pcn.Q[i])
+
+
+def test_from_pcn_copies_over_rho_for_constrained_pcn():
+    torch.manual_seed(3)
+
+    dims = [2, 4, 3, 8]
+
+    rho = [0.3, 0.5]
+    pcn = PCNetwork(dims, activation=lambda _: _, constrained=True, rho=rho)
+    cpcn = LinearBioPCN.from_pcn(pcn)
+
+    assert torch.allclose(cpcn.rho, pcn.rho)
+
+
+def test_from_pcn_leaves_rho_untouched_for_constrained_pcn():
+    torch.manual_seed(3)
+
+    dims = [2, 4, 3, 8]
+
+    rho = [0.3, 0.5]
+    pcn = PCNetwork(dims, activation=lambda _: _, constrained=False, rho=rho)
+    cpcn = LinearBioPCN.from_pcn(pcn)
+
+    assert torch.max(torch.abs(cpcn.rho - pcn.rho)) > 0.1
+
+
+def test_from_pcn_copies_over_biases_when_match_weights_is_true():
+    torch.manual_seed(2)
+
+    dims = [2, 4, 3, 7, 3]
+    variances = [0.5, 1.2, 0.7, 0.3]
+
+    pcn = PCNetwork(dims, variances=variances, activation=lambda _: _)
+    with torch.no_grad():
+        for h in pcn.h:
+            h.uniform_()
+
+    cpcn = LinearBioPCN.from_pcn(pcn, match_weights=True)
+
+    # pass some data through the network to set the neural activities
+    pcn.relax(torch.FloatTensor([-0.3, 0.2]), torch.FloatTensor([0.4, -0.2, 0.5]))
+
+    # copy the neural activations over to CPCN
+    for i in range(len(dims)):
+        cpcn.z[i] = pcn.z[i].clone().detach()
+
+    # now calculate and compare loss
+    pcn_loss = pcn.loss().item()
+    cpcn_loss = cpcn.pc_loss().item()
+
+    assert pcn_loss == pytest.approx(cpcn_loss)
+
+
+def test_from_pcn_copies_over_state_of_bias():
+    torch.manual_seed(3)
+
+    pcn = PCNetwork([2, 5, 3, 7], activation=lambda _: _, bias=False)
+    cpcn = LinearBioPCN.from_pcn(pcn)
+
+    assert not cpcn.bias_a
+    assert not cpcn.bias_b
+
+
+def test_from_pcn_additional_kwargs_go_to_biopcn_constructor():
+    torch.manual_seed(3)
+
+    rho = torch.FloatTensor([0.5, 0.7])
+    pcn = PCNetwork([2, 5, 3, 7], activation=lambda _: _)
+    cpcn = LinearBioPCN.from_pcn(pcn, rho=rho)
+
+    assert torch.allclose(cpcn.rho, rho)
+
+
+def test_from_pcn_additional_kwargs_override_conductances():
+    torch.manual_seed(3)
+
+    pcn = PCNetwork([2, 5, 3, 7], activation=lambda _: _)
+    g_a = 0.75
+    cpcn = LinearBioPCN.from_pcn(pcn, g_a=g_a)
+
+    assert torch.max(torch.abs(cpcn.g_a - g_a)) < 1e-5
+
+
+def test_from_pcn_additional_kwargs_override_no_bias():
+    torch.manual_seed(3)
+
+    pcn = PCNetwork([2, 5, 3, 7], activation=lambda _: _, bias=False)
+    cpcn = LinearBioPCN.from_pcn(pcn, match_weights=True, bias_a=True)
+
+    assert cpcn.bias_a
+    assert not cpcn.bias_b
+
+
+def test_from_pcn_additional_kwargs_override_yes_bias():
+    torch.manual_seed(3)
+
+    dims = [2, 5, 3, 7]
+    pcn = PCNetwork(dims, activation=lambda _: _, bias=True)
+    cpcn = LinearBioPCN.from_pcn(pcn, match_weights=True, bias_a=False)
+
+    assert not cpcn.bias_a
+    assert cpcn.bias_b
+
+    for i in range(len(dims) - 2):
+        assert torch.allclose(cpcn.h_b[i], pcn.h[i])

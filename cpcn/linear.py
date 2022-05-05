@@ -586,3 +586,61 @@ class LinearBioPCN:
             f")"
         )
         return s
+
+    @staticmethod
+    def from_pcn(
+        pcn, match_weights: bool = False, check_activation: bool = True, **kwargs
+    ) -> "LinearBioPCN":
+        """Create linear BioPCN network matching a Whittington & Bogacz network.
+        
+        :param pcn: source `PCNetwork`
+        :param match_weights: if true, copy over initial weights and biases; otherwise
+            only match static parameters, like conductances
+        :param check_activation: whether to try to ensure that the activation function
+            is trivial
+        :param **kwargs: additional arguments are passed directly to `LinearBioPCN`,
+            overriding any other values
+        :return: a `LinearBioPCN` instance with matching parameters
+        """
+        if check_activation:
+            # make a quick, hacky check that the PCNetwork has trivial activation
+            test_x = torch.FloatTensor([-0.1, 0.0, 0.3])
+            for activation in pcn.activation:
+                if not torch.allclose(test_x, activation(test_x)):
+                    raise ValueError("cannot copy over net with non-trivial activation")
+
+        g_a = 0.5 / pcn.variances[1:]
+        g_b = 0.5 / pcn.variances[:-1]
+
+        g_a[-1] *= 2
+        g_b[0] *= 2
+
+        kwargs.setdefault("g_a", g_a)
+        kwargs.setdefault("g_b", g_b)
+        kwargs.setdefault("c_m", 0)
+        kwargs.setdefault("l_s", kwargs["g_b"])
+        kwargs.setdefault("bias_a", pcn.bias)
+        kwargs.setdefault("bias_b", pcn.bias)
+        if pcn.constrained:
+            kwargs["rho"] = pcn.rho
+
+        cpcn = LinearBioPCN(pcn.dims, **kwargs)
+
+        if match_weights:
+            D = len(cpcn.inter_dims)
+            for i in range(D):
+                cpcn.W_a[i] = pcn.W[i + 1].detach().clone()
+                cpcn.W_b[i] = pcn.W[i].detach().clone()
+
+            if pcn.bias:
+                for i in range(D):
+                    if cpcn.bias_a:
+                        cpcn.h_a[i] = pcn.h[i + 1].detach().clone()
+                    if cpcn.bias_b:
+                        cpcn.h_b[i] = pcn.h[i].detach().clone()
+
+            if pcn.constrained:
+                for i in range(D):
+                    cpcn.Q[i] = pcn.Q[i].detach().clone()
+
+        return cpcn
