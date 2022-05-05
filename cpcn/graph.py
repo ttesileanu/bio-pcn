@@ -40,7 +40,9 @@ def show_constraint_diagnostics(
     sel_cov = torch.linspace(0, n_cov - 1, 5).int()
 
     for ax, i in zip(mat_axs, sel_cov):
-        ax.imshow(diagnostics["cov:1"][i])
+        crt_cov = diagnostics["cov:1"][i]
+        crt_scale = torch.max(torch.abs(crt_cov))
+        ax.imshow(crt_cov, vmin=-crt_scale, vmax=crt_scale, cmap="RdBu_r")
         ax.set_title(f"batch {diagnostics['batch'][i]}")
 
     # draw the evolution of the trace of the constraint
