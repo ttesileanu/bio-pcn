@@ -67,10 +67,10 @@ trainer = Trainer(net, dataset["train"], dataset["validation"])
 trainer.peek_validation(every=10)
 trainer.set_classifier("linear")
 
-initial_lr = 0.001
+initial_lr = 0.008
 final_lr = initial_lr
 trainer.set_optimizer(torch.optim.Adam, lr=initial_lr)
-# trainer.set_optimizer(torch.optim.SGD, lr=initial_lr)
+trainer.set_optimizer(torch.optim.SGD, lr=initial_lr)
 # power = 0.8
 # rate = (initial_lr / final_lr - 1) / (n_batches ** power)
 # trainer.add_scheduler(

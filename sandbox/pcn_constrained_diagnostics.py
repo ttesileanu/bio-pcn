@@ -58,7 +58,9 @@ trainer = Trainer(net, dataset["train"], dataset["validation"])
 trainer.peek_validation(every=10)
 trainer.set_classifier("linear")
 
-trainer.set_optimizer(torch.optim.Adam, lr=0.003)
+trainer.set_optimizer(torch.optim.SGD, lr=0.02)
+trainer.set_lr_factor("Q", 10)
+# trainer.set_optimizer(torch.optim.Adam, lr=0.003)
 # trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.9))
 
 if net.constrained:
@@ -103,5 +105,10 @@ D = len(net.dims) - 1
 with dv.FigureManager(1, D) as (_, axs):
     for k, ax in enumerate(axs):
         show_weight_evolution(results.weight["batch"], results.weight[f"W:{k}"], ax=ax)
+        ax.set_title(f"W:{k}")
+
+with dv.FigureManager() as (_, ax):
+    show_weight_evolution(results.weight["batch"], results.weight["Q:0"], ax=ax)
+    ax.set_title("Q")
 
 # %%

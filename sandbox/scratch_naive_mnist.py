@@ -55,8 +55,11 @@ trainer = Trainer(net, dataset["train"], dataset["validation"])
 trainer.peek_validation(every=10)
 trainer.set_classifier("linear")
 
-trainer.set_optimizer(torch.optim.Adam, lr=0.003)
-# trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.99))
+# trainer.set_optimizer(torch.optim.Adam, lr=0.004)
+trainer.set_optimizer(torch.optim.SGD, lr=0.008)
+# trainer.add_scheduler(
+#     partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.9), every=100
+# )
 
 results = trainer.run(n_batches=n_batches, progress=tqdm)
 
@@ -102,7 +105,8 @@ biopcn_trainer = Trainer(biopcn_net, dataset["train"], dataset["validation"])
 biopcn_trainer.peek_validation(every=10)
 biopcn_trainer.set_classifier("linear")
 
-biopcn_trainer.set_optimizer(torch.optim.Adam, lr=0.004)
+biopcn_trainer.set_optimizer(torch.optim.SGD, lr=0.008)
+# biopcn_trainer.set_optimizer(torch.optim.Adam, lr=0.004)
 # biopcn_trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.997))
 
 biopcn_results = biopcn_trainer.run(n_batches=n_batches, progress=tqdm)
