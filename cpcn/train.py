@@ -473,6 +473,7 @@ class Trainer:
         condition: Optional[Callable] = None,
         every: Optional[int] = None,
         count: Optional[int] = None,
+        mask: Optional[Sequence] = None,
         profile: bool = False,
     ) -> "Trainer":
         """Set an observer.
@@ -499,14 +500,15 @@ class Trainer:
         :param condition: condition to be fulfilled for the observer to be called; this
             has signature (batch: int) -> bool; must return true to call observer
         :param every: run observer every `every` batches, starting at 0; overridden by
-            `condition`
+            `condition` or `mask`
         :param count: run observer `count` times during a run; the batches at which the
             observer is run are given by `floor(linspace(0, n_batches - 1, count))`;
-            overriden by `condition`
+            overriden by `condition` or `mask`
+        :param mask: store whenever `mask[batch]` is true
         :param profile: whether to request the loss and latent profile from
             `net.relax()`
         """
-        condition = self._get_condition_fct(condition, every, count)
+        condition = self._get_condition_fct(condition, every, count, mask)
         self.observers.append((observer, condition, profile))
         return self
 
@@ -562,6 +564,7 @@ class Trainer:
         condition: Optional[Callable] = None,
         every: Optional[int] = None,
         count: Optional[int] = None,
+        mask: Optional[Sequence] = None,
     ) -> "Trainer":
         """Add per-batch monitoring.
         
@@ -576,6 +579,7 @@ class Trainer:
             `add_observer`
         :param every: store every `every` batches; see `add_observer`
         :param count: store `count` times during a run; see `add_observer`
+        :param mask: store whenever `mask[batch]` is true; see `add_observer`
         """
         if hasattr(self.history, name):
             raise ValueError("monitor name already in use")
@@ -585,6 +589,7 @@ class Trainer:
             condition=condition,
             every=every,
             count=count,
+            mask=mask,
         )
 
     def peek_sample(
@@ -594,6 +599,8 @@ class Trainer:
         condition: Optional[Callable] = None,
         every: Optional[int] = None,
         count: Optional[int] = None,
+        mask: Optional[Sequence] = None,
+        sample_mask: Optional[Sequence] = None,
     ) -> "Trainer":
         """Add per-sample monitoring.
         
@@ -607,15 +614,18 @@ class Trainer:
             `add_observer`
         :param every: store every `every` batches; see `add_observer`
         :param count: store `count` times during a run; see `add_observer`
+        :param mask: store whenever `mask[batch]` is true; see `add_observer`
+        :param sample_mask: a mask showing which samples within a batch to use
         """
         if hasattr(self.history, name):
             raise ValueError("monitor name already in use")
         self._setup_history(name, vars, "sample")
         return self.add_observer(
-            lambda ns, name=name: self._sample_monitor(name, ns),
+            lambda ns, name=name, sel=sample_mask: self._sample_monitor(name, ns, sel),
             condition=condition,
             every=every,
             count=count,
+            mask=mask,
         )
 
     def peek_fast_dynamics(
@@ -625,6 +635,8 @@ class Trainer:
         condition: Optional[Callable] = None,
         every: Optional[int] = None,
         count: Optional[int] = None,
+        mask: Optional[Sequence] = None,
+        sample_mask: Optional[Sequence] = None,
     ) -> "Trainer":
         """Add monitoring of fast (`relax`) dynamics.
         
@@ -639,15 +651,20 @@ class Trainer:
             `add_observer`
         :param every: store every `every` batches; see `add_observer`
         :param count: store `count` times during a run; see `add_observer`
+        :param mask: store whenever `mask[batch]` is true; see `add_observer`
+        :param sample_mask: a mask showing which samples within a batch to use
         """
         if hasattr(self.history, name):
             raise ValueError("monitor name already in use")
         self._setup_history(name, vars, "sample")
         return self.add_observer(
-            lambda ns, name=name: self._sub_sample_monitor(name, ns),
+            lambda ns, name=name, sel=sample_mask: self._sub_sample_monitor(
+                name, ns, sel
+            ),
             condition=condition,
             every=every,
             count=count,
+            mask=mask,
             profile=True,
         )
 
@@ -656,6 +673,7 @@ class Trainer:
         condition: Optional[Callable] = None,
         every: Optional[int] = None,
         count: Optional[int] = None,
+        mask: Optional[Sequence] = None,
     ) -> "Trainer":
         """Set how often to evaluate on validation set.
         
@@ -665,8 +683,11 @@ class Trainer:
             `add_observer`
         :param every: store every `every` batches; see `add_observer`
         :param count: store `count` times during a run; see `add_observer`
+        :param mask: store whenever `mask[batch]` is true; see `add_observer`
         """
-        self.validation_condition = self._get_condition_fct(condition, every, count)
+        self.validation_condition = self._get_condition_fct(
+            condition, every, count, mask
+        )
         return self
 
     def add_scheduler(
@@ -674,6 +695,7 @@ class Trainer:
         scheduler: Callable,
         condition: Optional[Callable] = None,
         every: Optional[int] = None,
+        mask: Optional[Sequence] = None,
     ) -> "Trainer":
         """Add a constructor for a learning-rate scheduler.
         
@@ -687,25 +709,35 @@ class Trainer:
             lambda optimizer: torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.9)
         
         :param scheduler: the constructor for the scheduler
-        :param condition: condition to be fulfilled for the observer to be called; this
+        :param condition: condition to be fulfilled for the scheduler to be called; this
             has signature (batch: int) -> bool; default: after every epoch
-        :param every: run observer every `every` batches; unlike observers, this is not
+        :param every: run scheduler every `every` batches; unlike observers, this is not
             run on the 0th batch, but starting at batch `every - 1`; overridden by
             `condition`
+        :param mask: run whenever `mask[batch]` is true
         """
         if condition is None:
-            if every is None:
-                every = len(self.train_loader)
-            condition = lambda batch, every=every: (batch + 1) % every == 0
+            if mask is None:
+                if every is None:
+                    every = len(self.train_loader)
+                condition = lambda batch, every=every: (batch + 1) % every == 0
+            else:
+                condition = lambda batch, mask=mask: mask[batch]
         self.schedulers.append((scheduler, condition))
         return self
 
     def _get_condition_fct(
-        self, condition: Optional[Callable], every: Optional[int], count: Optional[int],
+        self,
+        condition: Optional[Callable],
+        every: Optional[int],
+        count: Optional[int],
+        mask: Optional[Sequence],
     ):
         """Convert various ways of specifying a condition to a function."""
         if condition is None:
-            if every is not None:
+            if mask is not None:
+                condition = lambda batch, mask=mask: mask[batch]
+            elif every is not None:
                 condition = lambda batch, every=every: batch % every == 0
             elif count is not None and count > 0:
                 condition = lambda batch, count=count: self._count_condition(
@@ -750,9 +782,11 @@ class Trainer:
             # send to CPU so this does not take up GPU memory!
             target.append(value.detach().to("cpu").clone().unsqueeze(0))
 
-    def _sample_monitor(self, name: str, ns: SimpleNamespace):
+    def _sample_monitor(self, name: str, ns: SimpleNamespace, sel: Optional[Sequence]):
         """Observer called to update per-sample monitors."""
         target_dict = getattr(self.history, name)
+
+        batch_size = None
         for var, target in target_dict.items():
             if var in ["epoch", "batch", "sample"]:
                 continue
@@ -766,18 +800,31 @@ class Trainer:
             # handle batch size of 1
             if value.ndim == 1:
                 value = value.unsqueeze(0)
+            value = value.detach()
+            if batch_size is None:
+                batch_size = len(value)
+            if sel is not None:
+                value = value[sel]
             # send to CPU so this does not take up GPU memory!
-            value = value.detach().to("cpu").clone()
-            target.append(value)
+            target.append(value.to("cpu").clone())
 
-        batch_size = len(value)
-        target_dict["epoch"].extend(batch_size * [ns.epoch])
-        target_dict["batch"].extend(batch_size * [ns.batch])
-        target_dict["sample"].extend(list(range(batch_size)))
+        if sel is None:
+            count = batch_size
+            target_dict["sample"].extend(list(range(batch_size)))
+        else:
+            batch_list = [i for i in range(batch_size) if sel[i]]
+            count = len(batch_list)
+            target_dict["sample"].extend(batch_list)
 
-    def _sub_sample_monitor(self, name: str, ns: SimpleNamespace):
+        target_dict["epoch"].extend(count * [ns.epoch])
+        target_dict["batch"].extend(count * [ns.batch])
+
+    def _sub_sample_monitor(
+        self, name: str, ns: SimpleNamespace, sel: Optional[Sequence]
+    ):
         """Observer called to keep track of fast dynamics."""
         target_dict = getattr(self.history, name)
+        batch_size = None
         for var, target in target_dict.items():
             if var in ["epoch", "batch", "sample"]:
                 continue
@@ -791,15 +838,26 @@ class Trainer:
 
             # relax should ensure that we always have a batch index
             assert value.ndim > 1
-            # index0 = fast-dynamics iterations; index1 = sample index
             # send to CPU so this does not take up GPU memory!
-            value = value.detach().to("cpu").clone().transpose_(0, 1)
+            value = value.detach().to("cpu").clone()
+            # index0 = fast-dynamics iterations; index1 = sample index
+            value = value.transpose_(0, 1)
+            if batch_size is None:
+                batch_size = len(value)
+            if sel is not None:
+                value = value[sel]
             target.append(value)
 
-        batch_size = len(value)
-        target_dict["epoch"].extend(batch_size * [ns.epoch])
-        target_dict["batch"].extend(batch_size * [ns.batch])
-        target_dict["sample"].extend(list(range(batch_size)))
+        if sel is None:
+            count = batch_size
+            target_dict["sample"].extend(list(range(batch_size)))
+        else:
+            batch_list = [i for i in range(batch_size) if sel[i]]
+            count = len(batch_list)
+            target_dict["sample"].extend(batch_list)
+
+        target_dict["epoch"].extend(count * [ns.epoch])
+        target_dict["batch"].extend(count * [ns.batch])
 
     def _setup_history(self, name: str, vars: Sequence, type: str, size: int = 0):
         """Set up storage for a monitor.

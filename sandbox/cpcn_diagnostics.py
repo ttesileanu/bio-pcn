@@ -84,13 +84,13 @@ trainer.set_optimizer(torch.optim.SGD, lr=initial_lr)
 trainer.set_lr_factor("Q", 20.0)
 
 trainer.peek("weight", ["W_a", "W_b", "Q", "M"], every=10)
-trainer.peek_sample("latent", ["z"])
+trainer.peek_sample("latent", ["z"], sample_mask=torch.arange(batch_size) % 4 == 0)
 
 trainer.peek_fast_dynamics(
     "fast",
     ["a", "b", "z", "n"],
     count=4,
-    # sample_mask=torch.arange(batch_size) == batch_size - 1,
+    sample_mask=torch.arange(batch_size) % 10 == 0,
 )
 
 results = trainer.run(n_batches=n_batches, progress=tqdm)
