@@ -250,20 +250,21 @@ class PCNetwork(object):
         implementation is more consistent with what we do for BioPCN, and is also
         significantly faster in this case.
         """
-        # calculate activations and derivatives
-        fz = []
-        fz_der = []
-        for i in range(len(self.dims) - 1):
-            f = self.activation[i]
+        with torch.enable_grad():
+            # calculate activations and derivatives
+            fz = []
+            fz_der = []
+            for i in range(len(self.dims) - 1):
+                f = self.activation[i]
 
-            z = self.z[i].detach().requires_grad_()
-            crt_fz = f(z)
-            crt_fz_der = torch.autograd.grad(
-                crt_fz, z, grad_outputs=torch.ones_like(z), create_graph=True
-            )[0]
+                z = self.z[i].detach().requires_grad_()
+                crt_fz = f(z)
+                crt_fz_der = torch.autograd.grad(
+                    crt_fz, z, grad_outputs=torch.ones_like(z), create_graph=True
+                )[0]
 
-            fz.append(crt_fz.detach())
-            fz_der.append(crt_fz_der.detach())
+                fz.append(crt_fz.detach())
+                fz_der.append(crt_fz_der.detach())
 
         with torch.no_grad():
             # calculate error nodes

@@ -857,3 +857,8 @@ def test_parameters_not_tensors_even_if_fed_tensors(var):
     )
     for x in getattr(net, var):
         assert not torch.is_tensor(x)
+
+
+def test_relax_works_when_called_inside_no_grad(net):
+    with torch.no_grad():
+        net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
