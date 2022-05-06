@@ -33,7 +33,7 @@ dataset = load_mnist(n_validation=1000, device=device)
 n_batches = 3000
 dims = [784, 5, 10]
 z_it = 50
-z_lr = 0.07
+z_lr = 0.062
 rho = 0.015
 # rho = 0.0012
 
@@ -55,11 +55,17 @@ trainer = Trainer(net, dataset["train"], dataset["validation"])
 trainer.peek_validation(every=10)
 trainer.set_classifier("linear")
 
-# trainer.set_optimizer(torch.optim.Adam, lr=0.004)
-trainer.set_optimizer(torch.optim.SGD, lr=0.008)
-# trainer.add_scheduler(
-#     partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.9), every=100
-# )
+trainer.set_optimizer(torch.optim.SGD, lr=0.01)
+trainer.set_lr_factor("Q", 0.11)
+lr_power = 1.0
+lr_rate = 4e-4
+trainer.add_scheduler(
+    partial(
+        torch.optim.lr_scheduler.LambdaLR,
+        lr_lambda=lambda batch: 1 / (1 + lr_rate * batch ** lr_power),
+    ),
+    every=1,
+)
 
 results = trainer.run(n_batches=n_batches, progress=tqdm)
 
@@ -75,7 +81,7 @@ _ = show_learning_curves(results)
 
 # %%
 z_it = 50
-z_lr = 0.02
+z_lr = 0.13
 
 torch.manual_seed(123)
 
@@ -105,9 +111,17 @@ biopcn_trainer = Trainer(biopcn_net, dataset["train"], dataset["validation"])
 biopcn_trainer.peek_validation(every=10)
 biopcn_trainer.set_classifier("linear")
 
-biopcn_trainer.set_optimizer(torch.optim.SGD, lr=0.008)
-# biopcn_trainer.set_optimizer(torch.optim.Adam, lr=0.004)
-# biopcn_trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.997))
+biopcn_trainer.set_optimizer(torch.optim.SGD, lr=0.003)
+biopcn_trainer.set_lr_factor("Q", 3.5)
+lr_power = 1.0
+lr_rate = 2e-4
+biopcn_trainer.add_scheduler(
+    partial(
+        torch.optim.lr_scheduler.LambdaLR,
+        lr_lambda=lambda batch: 1 / (1 + lr_rate * batch ** lr_power),
+    ),
+    every=1,
+)
 
 biopcn_results = biopcn_trainer.run(n_batches=n_batches, progress=tqdm)
 
