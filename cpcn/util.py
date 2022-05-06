@@ -203,3 +203,20 @@ def get_constraint_diagnostics(
         res["max_eval:" + layer] = crt_max_eval
 
     return res
+
+
+def pretty_size(num: float, suffix: str = "B", multiplier: float = 1024.0) -> str:
+    """Pretty-format a size.
+
+    This does things like write `1024` as `1KB`. Largest level is terra (`"T"`).
+    
+    :param num: the number to format
+    :param suffix: suffix to use
+    :param multiplier: multiplier to use
+    """
+    # adapted from https://stackoverflow.com/questions/1094841/get-human-readable-version-of-file-size
+    for unit in ["", "K", "M", "G"]:
+        if abs(num) < multiplier:
+            return f"{num:3.1f}{unit}{suffix}"
+        num /= multiplier
+    return f"{num:.1f}T{suffix}"

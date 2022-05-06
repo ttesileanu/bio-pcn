@@ -174,7 +174,8 @@ class PCNetwork(object):
             self.calculate_z_grad()
 
             if pc_loss_profile:
-                losses[i] = self.pc_loss().item()
+                with torch.no_grad():
+                    losses[i] = self.pc_loss().item()
 
             fast_optimizer.step()
 
@@ -261,28 +262,29 @@ class PCNetwork(object):
                 crt_fz, z, grad_outputs=torch.ones_like(z), create_graph=True
             )[0]
 
-            fz.append(crt_fz)
-            fz_der.append(crt_fz_der)
+            fz.append(crt_fz.detach())
+            fz_der.append(crt_fz_der.detach())
 
-        # calculate error nodes
-        eps = []
-        for i in range(1, len(self.dims)):
-            mu = fz[i - 1] @ self.W[i - 1].T
-            if self.bias:
-                mu += self.h[i - 1]
+        with torch.no_grad():
+            # calculate error nodes
+            eps = []
+            for i in range(1, len(self.dims)):
+                mu = fz[i - 1] @ self.W[i - 1].T
+                if self.bias:
+                    mu += self.h[i - 1]
 
-            eps.append((self.z[i] - mu) / self.variances[i - 1])
+                eps.append((self.z[i] - mu) / self.variances[i - 1])
 
-        # calculate the gradients
-        for i in range(1, len(self.dims) - 1):
-            grad0 = eps[i - 1] - fz_der[i] * (eps[i] @ self.W[i])
-            if self.constrained:
-                v = self.variances[i - 1]
-                grad0 += fz_der[i] * (fz[i] @ self.Q[i - 1].T @ self.Q[i - 1]) / v
+            # calculate the gradients
+            for i in range(1, len(self.dims) - 1):
+                grad0 = eps[i - 1] - fz_der[i] * (eps[i] @ self.W[i])
+                if self.constrained:
+                    v = self.variances[i - 1]
+                    grad0 += fz_der[i] * (fz[i] @ self.Q[i - 1].T @ self.Q[i - 1]) / v
 
-            if grad0.ndim == self.z[i].ndim + 1:
-                grad0 = grad0.mean(dim=0)
-            self.z[i].grad = grad0
+                if grad0.ndim == self.z[i].ndim + 1:
+                    grad0 = grad0.mean(dim=0)
+                self.z[i].grad = grad0
 
     def calculate_weight_grad(self, reduction: str = "mean"):
         """Calculate gradients for slow (weight) variables.

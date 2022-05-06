@@ -7,7 +7,7 @@ from collections import OrderedDict
 import torch
 import numpy as np
 
-from .util import one_hot_accuracy, hierarchical_get
+from .util import one_hot_accuracy, hierarchical_get, pretty_size
 
 
 class Trainer:
@@ -148,32 +148,34 @@ class Trainer:
             batch_results = self.net.relax(
                 x, y, pc_loss_profile=need_profile, latent_profile=need_profile
             )
-            pc_loss = self.net.pc_loss().item()
+            with torch.no_grad():
+                pc_loss = self.net.pc_loss().item()
             self.net.calculate_weight_grad()
             optimizer.step()
 
             # use and train classifier, if we have one
             y_pred = self._get_and_train_prediction(x, y, classifier_optim)
 
-            # keep track of per-batch indicators
-            accuracy = self.accuracy_fct(y_pred, y)
+            with torch.no_grad():
+                # keep track of per-batch indicators
+                accuracy = self.accuracy_fct(y_pred, y)
 
-            # call any batch observers; this also stores training-mode diagnostics
-            self._report(observers, epoch, batch, pc_loss, accuracy, batch_results)
-            if self.validation_condition(batch):
-                # this fills out the `validation` and `train` fields of history
-                self._validation_run(epoch, batch)
+                # call any batch observers; this also stores training-mode diagnostics
+                self._report(observers, epoch, batch, pc_loss, accuracy, batch_results)
+                if self.validation_condition(batch):
+                    # this fills out the `validation` and `train` fields of history
+                    self._validation_run(epoch, batch)
 
-            # run learning-rate schedulers
-            for scheduler, condition in schedulers:
-                if condition(batch):
-                    scheduler.step()
+                # run learning-rate schedulers
+                for scheduler, condition in schedulers:
+                    if condition(batch):
+                        scheduler.step()
 
-            # update progress bar, if any
-            if pbar is not None:
-                pbar.update()
-                progress_info = self._pbar_report(epoch, batch)
-                pbar.set_postfix(progress_info, refresh=False)
+                # update progress bar, if any
+                if pbar is not None:
+                    pbar.update()
+                    progress_info = self._pbar_report(epoch, batch)
+                    pbar.set_postfix(progress_info, refresh=False)
 
             batch += 1
 
@@ -346,6 +348,12 @@ class Trainer:
             "val_loss": val_loss_str,
             "val_acc": acc_list_str,
         }
+
+        # add CUDA memory usage, if CUDA is being used
+        if self.net.z[0].is_cuda:
+            memory = torch.cuda.memory_allocated(self.net.z[0].device)
+            progress_info["cuda_mem"] = pretty_size(memory)
+
         return progress_info
 
     def __str__(self) -> str:
@@ -433,7 +441,7 @@ class Trainer:
 
         if classifier_dim is not None:
             self.classifier_dim = classifier_dim
-        
+
         if device is None:
             device = self.net.z[0].device
         self.classifier = self.classifier.to(device)
@@ -737,9 +745,10 @@ class Trainer:
             if len(parts) > 0:
                 # this is part of a multi-layer variable
                 k = int(parts[-1])
-                target.append(value[k].detach().clone().unsqueeze(0))
-            else:
-                target.append(value.detach().clone().unsqueeze(0))
+                value = value[k]
+
+            # send to CPU so this does not take up GPU memory!
+            target.append(value.detach().to("cpu").clone().unsqueeze(0))
 
     def _sample_monitor(self, name: str, ns: SimpleNamespace):
         """Observer called to update per-sample monitors."""
@@ -757,7 +766,8 @@ class Trainer:
             # handle batch size of 1
             if value.ndim == 1:
                 value = value.unsqueeze(0)
-            value = value.detach().clone()
+            # send to CPU so this does not take up GPU memory!
+            value = value.detach().to("cpu").clone()
             target.append(value)
 
         batch_size = len(value)
@@ -782,7 +792,8 @@ class Trainer:
             # relax should ensure that we always have a batch index
             assert value.ndim > 1
             # index0 = fast-dynamics iterations; index1 = sample index
-            value = value.detach().clone().transpose_(0, 1)
+            # send to CPU so this does not take up GPU memory!
+            value = value.detach().to("cpu").clone().transpose_(0, 1)
             target.append(value)
 
         batch_size = len(value)
