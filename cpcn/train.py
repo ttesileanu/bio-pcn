@@ -366,7 +366,10 @@ class Trainer:
         return s
 
     def set_classifier(
-        self, classifier: Union[Callable, None], classifier_dim: Optional[int] = None
+        self,
+        classifier: Union[Callable, None],
+        classifier_dim: Optional[int] = None,
+        device: Optional[torch.device] = None,
     ) -> "Trainer":
         """Set a classifier to use for predictions.
 
@@ -386,6 +389,7 @@ class Trainer:
         
         :param classifier: the classifier to use
         :param classifier_dim: which layer of `net` to pass into the classifier
+        :param device: device to send the classifier to; default: `net.z[0].device`
         """
         self.classifier = classifier
         if isinstance(self.classifier, str):
@@ -429,6 +433,10 @@ class Trainer:
 
         if classifier_dim is not None:
             self.classifier_dim = classifier_dim
+        
+        if device is None:
+            device = self.net.z[0].device
+        self.classifier = self.classifier.to(device)
 
         return self
 

@@ -51,19 +51,12 @@ class PCNetwork(object):
 
         self.z_it = z_it
         self.z_lr = z_lr
-        self.variances = torch.from_numpy(
-            np.copy(variances)
-            if np.size(variances) > 1
-            else np.repeat(variances, len(self.dims) - 1)
-        ).float()
-        self.rho = torch.from_numpy(
-            np.copy(rho) if np.size(rho) > 1 else np.repeat(rho, len(self.dims) - 2)
-        ).float()
+        self.variances = self._extend(variances, len(self.dims) - 1)
+        self.rho = self._extend(rho, len(self.dims) - 2)
+
         self.constrained = constrained
         self.bias = bias
         self.fast_optimizer = fast_optimizer
-
-        assert len(self.variances) == len(self.dims) - 1
 
         # create and initialize the network parameters
         # weights and biases
@@ -212,7 +205,7 @@ class PCNetwork(object):
         x = self.z[0]
 
         batch_size = 1 if x.ndim == 1 else len(x)
-        loss = torch.zeros(batch_size)
+        loss = torch.zeros(batch_size).to(x.device)
 
         for i in range(len(self.dims) - 1):
             x_pred = self.activation[i](x)
@@ -376,6 +369,18 @@ class PCNetwork(object):
         These are the random variables in all but the input and output layers.
         """
         return self.z[1:-1]
+
+    @staticmethod
+    def _extend(var: Sequence, n: int) -> np.ndarray:
+        """Extend a scalar to a given number of elements, or convert a list/tensor of
+        the correct length to a numpy array. The data type is also converted to float.
+        """
+        if torch.is_tensor(var):
+            var = var.detach().numpy()
+        res = (np.copy(var) if np.size(var) > 1 else np.repeat(var, n)).astype(float)
+
+        assert len(res) == n
+        return res
 
     def __str__(self) -> str:
         s = (

@@ -1255,7 +1255,7 @@ def test_from_pcn_copies_over_rho_for_constrained_pcn():
     pcn = PCNetwork(dims, activation=lambda _: _, constrained=True, rho=rho)
     cpcn = LinearBioPCN.from_pcn(pcn)
 
-    assert torch.allclose(cpcn.rho, pcn.rho)
+    np.testing.assert_allclose(cpcn.rho, pcn.rho)
 
 
 def test_from_pcn_leaves_rho_untouched_for_constrained_pcn():
@@ -1314,7 +1314,7 @@ def test_from_pcn_additional_kwargs_go_to_biopcn_constructor():
     pcn = PCNetwork([2, 5, 3, 7], activation=lambda _: _)
     cpcn = LinearBioPCN.from_pcn(pcn, rho=rho)
 
-    assert torch.allclose(cpcn.rho, rho)
+    np.testing.assert_allclose(cpcn.rho, rho)
 
 
 def test_from_pcn_additional_kwargs_override_conductances():
@@ -1349,3 +1349,17 @@ def test_from_pcn_additional_kwargs_override_yes_bias():
 
     for i in range(len(dims) - 2):
         assert torch.allclose(cpcn.h_b[i], pcn.h[i])
+
+
+@pytest.mark.parametrize("var", ["g_a", "g_b", "l_s", "c_m", "rho"])
+def test_parameters_not_tensors(net_nontrivial_constraint, var):
+    net = net_nontrivial_constraint
+    for x in getattr(net, var):
+        assert not torch.is_tensor(x)
+
+
+@pytest.mark.parametrize("var", ["g_a", "g_b", "l_s", "c_m", "rho"])
+def test_parameters_not_tensors_even_if_fed_tensors(var):
+    net = LinearBioPCN([2, 5, 3, 4], **{var: torch.FloatTensor([0.3, 1.2])})
+    for x in getattr(net, var):
+        assert not torch.is_tensor(x)

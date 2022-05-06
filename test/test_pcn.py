@@ -649,7 +649,7 @@ def test_loss_reduction_mean(net, data):
 @pytest.fixture
 def net_constraint():
     torch.manual_seed(20392)
-    net = PCNetwork([3, 4, 5, 2], constrained=True, rho=[0.2, 1.5, 0.7])
+    net = PCNetwork([3, 4, 5, 2], constrained=True, rho=[0.2, 1.5])
     return net
 
 
@@ -692,13 +692,16 @@ def test_calculate_weight_grad_matches_backward_on_loss_constraint(
 
 
 def test_loss_ignore_constraint_works(data):
-    torch.manual_seed(20392)
-    net1 = PCNetwork([3, 4, 5, 2], constrained=True, rho=[0.2, 1.5, 0.7])
+    seed = 20392
+    torch.manual_seed(seed)
+    dims = [3, 4, 5, 2]
+    rho = [0.2, 1.5]
+    net1 = PCNetwork(dims, constrained=True, rho=rho)
     net1.relax(data.x, data.y)
     loss1 = net1.loss(ignore_constraint=True)
 
-    torch.manual_seed(20392)
-    net2 = PCNetwork([3, 4, 5, 2], constrained=True, rho=[0.2, 1.5, 0.7])
+    torch.manual_seed(seed)
+    net2 = PCNetwork(dims, constrained=True, rho=rho)
     net2.relax(data.x, data.y)
     net2.constrained = False
     loss2 = net2.loss()
@@ -836,3 +839,21 @@ def test_slow_parameters_no_constraint(net):
     names = [_["name"] for _ in params]
 
     assert "Q" not in names
+
+
+@pytest.mark.parametrize("var", ["variances", "rho"])
+def test_parameters_not_tensors(net_ntv, var):
+    for x in getattr(net_ntv, var):
+        assert not torch.is_tensor(x)
+
+
+@pytest.mark.parametrize("var", ["variances", "rho"])
+def test_parameters_not_tensors_even_if_fed_tensors(var):
+    net = PCNetwork(
+        [2, 5, 3, 4],
+        variances=torch.FloatTensor([0.5, 1.3, 2.4]),
+        rho=torch.FloatTensor([0.3]),
+        constrained=True,
+    )
+    for x in getattr(net, var):
+        assert not torch.is_tensor(x)

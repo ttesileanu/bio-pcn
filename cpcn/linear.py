@@ -392,7 +392,7 @@ class LinearBioPCN:
         :param reduction: reduction to apply to the output: `"none" | "mean" | "sum"`
         """
         batch_size = 1 if self.z[0].ndim == 1 else len(self.z[0])
-        loss = torch.zeros(batch_size)
+        loss = torch.zeros(batch_size).to(self.z[0].device)
 
         D = len(self.pyr_dims) - 2
         for i in range(D):
@@ -537,20 +537,19 @@ class LinearBioPCN:
             h.zero_()
             h.requires_grad = True
 
-    def _expand_per_layer(self, theta) -> torch.Tensor:
-        """Expand a quantity to per-layer, if needed, and convert to tensor."""
+    def _expand_per_layer(self, theta) -> np.ndarray:
+        """Expand a quantity to per-layer, if needed, and convert to numpy array."""
         D = len(self.pyr_dims) - 2
 
         if torch.is_tensor(theta):
             assert theta.ndim == 1
             if len(theta) > 1:
                 assert len(theta) == D
-                theta = theta.clone()
+                theta = np.copy(theta.detach().numpy())
             else:
-                theta = theta * torch.ones(D)
+                theta = theta.item() * np.ones(D)
         elif hasattr(theta, "__len__") and len(theta) == D:
-            assert len(theta) == D
-            theta = torch.from_numpy(np.asarray(theta))
+            theta = np.copy(theta)
         elif np.size(theta) == 1:
             theta = theta * torch.ones(D)
         else:
