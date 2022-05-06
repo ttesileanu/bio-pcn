@@ -4,6 +4,7 @@
 import os
 import time
 from types import SimpleNamespace
+from functools import partial
 
 import pydove as dv
 from tqdm.notebook import tqdm
@@ -31,12 +32,13 @@ def optuna_reporter(trial: optuna.trial.Trial, ns: SimpleNamespace):
 def create_pcn(trial):
     dims = [28 * 28, 5, 10]
 
-    z_lr = trial.suggest_float("z_lr", 0.01, 0.4, log=True)
+    z_lr = trial.suggest_float("z_lr", 0.01, 0.2, log=True)
     rho = 0.015
     net = PCNetwork(
         dims,
-        lr_inference=z_lr,
-        it_inference=50,
+        activation=lambda _: _,
+        z_lr=z_lr,
+        z_it=50,
         variances=1,
         bias=False,
         constrained=True,
@@ -48,7 +50,7 @@ def create_pcn(trial):
 
 def objective(
     trial: optuna.trial.Trial,
-    n_epochs: int,
+    n_batches: int,
     dataset: dict,
     device: torch.device,
     seed: int,
@@ -57,29 +59,34 @@ def objective(
     scores = torch.zeros(n_rep)
     for i in tqdm(range(n_rep)):
         torch.manual_seed(seed + i)
-
         net = create_pcn(trial).to(device)
 
-        # optimizer_type = trial.suggest_categorical("optimizer", ["Adam", "RMSprop", "SGD"])
-        # optimizer_class = getattr(torch.optim, optimizer_type)
-        optimizer_class = torch.optim.Adam
-        lr = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
-
-        # rep_gamma = trial.suggest_float("rep_gamma", 1e-7, 0.2, log=True)
+        optimizer_class = torch.optim.SGD
+        lr = trial.suggest_float("lr", 5e-4, 0.05, log=True)
 
         trainer = Trainer(net, dataset["train"], dataset["validation"])
         trainer.set_optimizer(optimizer_class, lr=lr)
-        # trainer.add_scheduler(
-        #     lambda optim: torch.optim.lr_scheduler.ExponentialLR(
-        #         optim, gamma=1 - rep_gamma
-        #     )
-        # )
+
+        lr_power = 1.0
+        lr_rate = trial.suggest_float("lr_rate", 1e-5, 0.2, log=True)
+        trainer.add_scheduler(
+            partial(
+                torch.optim.lr_scheduler.LambdaLR,
+                lr_lambda=lambda batch: 1 / (1 + lr_rate * batch ** lr_power),
+            ),
+            every=1,
+        )
+
+        Q_lrf = trial.suggest_float("Q_lrf", 0.1, 20, log=True)
+        trainer.set_lr_factor("Q", Q_lrf)
+
+        trainer.peek_validation(count=10)
 
         # trainer.add_epoch_observer(lambda ns: optuna_reporter(trial, ns))
-        results = trainer.run(n_epochs)
+        results = trainer.run(n_batches=n_batches)
         scores[i] = results.validation["pc_loss"][-1]
 
-    score = torch.quantile(scores, 0.90)
+    score = torch.quantile(scores, 0.90).item()
     return score
 
 
@@ -89,18 +96,18 @@ t0 = time.time()
 
 device = torch.device("cpu")
 
-n_epochs = 200
+n_batches = 500
 seed = 1927
 n_rep = 5
 
-dataset = load_mnist(n_train=2000, n_validation=500, batch_size=100)
+dataset = load_mnist(n_validation=500, batch_size=100)
 
 sampler = optuna.samplers.TPESampler(seed=seed)
 study = optuna.create_study(direction="minimize", sampler=sampler)
 study.optimize(
-    lambda trial: objective(trial, n_epochs, dataset, device, seed, n_rep),
-    n_trials=40,
-    timeout=24000,
+    lambda trial: objective(trial, n_batches, dataset, device, seed, n_rep),
+    n_trials=25,
+    timeout=15000,
     show_progress_bar=True,
 )
 
