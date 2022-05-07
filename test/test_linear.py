@@ -273,16 +273,6 @@ def test_z_grad(net):
         assert torch.all(torch.isclose(net.z[i + 1].grad, -expected))
 
 
-def test_no_z_grad_for_input_and_output(net):
-    net.forward(torch.FloatTensor([0.2, -0.5, 0.3]))
-    net.calculate_currents()
-    net.calculate_z_grad()
-
-    # ensure gradient is zero for input and output layers
-    for i in [0, -1]:
-        assert net.z[i].grad is None
-
-
 def test_pc_loss_function(net):
     net.forward(torch.FloatTensor([0.2, -0.5, 0.3]))
     loss = net.pc_loss().item()
