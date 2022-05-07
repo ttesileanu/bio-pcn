@@ -12,7 +12,8 @@ import torch
 from tqdm.notebook import tqdm
 from functools import partial
 
-from cpcn import LinearBioPCN, PCNetwork, load_mnist, Trainer, show_learning_curves
+from cpcn import LinearBioPCN, PCNetwork, load_mnist, Trainer
+from cpcn.graph import show_learning_curves
 
 # %% [markdown]
 # ## Setup

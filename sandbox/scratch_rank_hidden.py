@@ -13,6 +13,7 @@ from tqdm.notebook import tqdm
 from functools import partial
 
 from cpcn import *
+from cpcn.graph import *
 
 # %% [markdown]
 # ## Setup

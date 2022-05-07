@@ -11,6 +11,7 @@ import torch
 from tqdm.notebook import tqdm
 
 from cpcn import *
+from cpcn.graph import *
 
 # %% [markdown]
 # ## Setup
