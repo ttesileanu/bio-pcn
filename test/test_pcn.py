@@ -660,7 +660,12 @@ def test_q_gradient_with_constraint(net_constraint, data):
 
     outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
     for i in range(len(net.dims) - 2):
-        fz = net.activation[i](net.z[i + 1])
+        fct = net.activation[i]
+        if fct == "tanh":
+            fct = torch.tanh
+        elif fct == "none":
+            fct = lambda _: _
+        fz = fct(net.z[i + 1])
         n = fz @ net.Q[i].T
         expected = (1 / net.variances[i]) * (net.rho[i] * net.Q[i] - outer(n, fz)).mean(
             dim=0
@@ -862,3 +867,43 @@ def test_parameters_not_tensors_even_if_fed_tensors(var):
 def test_relax_works_when_called_inside_no_grad(net):
     with torch.no_grad():
         net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
+
+
+def test_choose_activation_function_using_string():
+    seed = 43
+    dims = [2, 5, 4]
+
+    torch.manual_seed(seed)
+    net1 = PCNetwork(dims, activation="relu")
+
+    torch.manual_seed(seed)
+    net2 = PCNetwork(dims, activation=torch.relu)
+
+    x = torch.FloatTensor([0.3, -0.5])
+    y = torch.FloatTensor([1.3, 0.5, -0.5, 0.8])
+
+    net1.relax(x, y)
+    net2.relax(x, y)
+
+    for z1, z2 in zip(net1.z, net2.z):
+        assert torch.allclose(z1, z2)
+
+
+def test_default_activation_function_is_tanh():
+    seed = 43
+    dims = [2, 5, 4]
+
+    torch.manual_seed(seed)
+    net1 = PCNetwork(dims)
+
+    torch.manual_seed(seed)
+    net2 = PCNetwork(dims, activation="tanh")
+
+    x = torch.FloatTensor([0.3, -0.5])
+    y = torch.FloatTensor([1.3, 0.5, -0.5, 0.8])
+
+    net1.relax(x, y)
+    net2.relax(x, y)
+
+    for z1, z2 in zip(net1.z, net2.z):
+        assert torch.allclose(z1, z2)

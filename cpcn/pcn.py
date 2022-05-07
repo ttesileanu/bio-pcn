@@ -1,12 +1,21 @@
 """Implement the predictive-coding network from Whittington & Bogacz."""
 
 from types import SimpleNamespace
-from typing import Sequence, Union, Callable
+from typing import Sequence, Union, Callable, Tuple
 
 import torch
 import torch.nn as nn
 
 import numpy as np
+
+
+# mapping from strings to activation functions and their derivatives
+_zero = torch.FloatTensor([0.0])
+_activation_map = {
+    "none": (lambda _: _, lambda _: torch.ones_like(_)),
+    "relu": (torch.relu, lambda _: torch.heaviside(_, _zero).to(_.device)),
+    "tanh": (torch.tanh, lambda _: 1.0 / torch.cosh(_) ** 2),
+}
 
 
 class PCNetwork(object):
@@ -15,7 +24,7 @@ class PCNetwork(object):
     def __init__(
         self,
         dims: Sequence,
-        activation: Union[Sequence, Callable] = torch.tanh,
+        activation: Union[Sequence, Callable, str] = "tanh",
         z_it: int = 100,
         z_lr: float = 0.2,
         variances: Union[Sequence, float] = 1.0,
@@ -27,7 +36,9 @@ class PCNetwork(object):
         """Initialize the network.
 
         :param dims: number of units in each layer
-        :param activation: activation function(s) to use for each layer
+        :param activation: activation function(s) to use for each layer; they can be
+            callables or, preferrably, one of the following strings: `"none"` for linear
+            (no activation function); `"relu"`; `"tanh"`
         :param z_it: number of iterations per inference step
         :param z_lr: learning rate for inference step
         :param variances: variance(s) to use for each layer after the first
@@ -43,7 +54,7 @@ class PCNetwork(object):
         self.dims = np.copy(dims)
         self.activation = (
             (len(self.dims) - 1) * [activation]
-            if not hasattr(activation, "__len__")
+            if isinstance(activation, str) or not hasattr(activation, "__len__")
             else list(activation)
         )
 
@@ -106,8 +117,9 @@ class PCNetwork(object):
             z = [None for _ in self.z]
 
         z[0] = x
+        activation = self._get_activation_fcts()
         for i in range(len(self.dims) - 1):
-            x = self.activation[i](x)
+            x = activation[i](x)
 
             if self.bias:
                 x = x @ self.W[i].T + self.h[i]
@@ -208,8 +220,9 @@ class PCNetwork(object):
         batch_size = 1 if x.ndim == 1 else len(x)
         loss = torch.zeros(batch_size).to(x.device)
 
+        activation = self._get_activation_fcts()
         for i in range(len(self.dims) - 1):
-            x_pred = self.activation[i](x)
+            x_pred = activation[i](x)
 
             if i > 0 and not ignore_constraint and self.constrained:
                 Q = self.Q[i - 1]
@@ -250,21 +263,31 @@ class PCNetwork(object):
         implementation is more consistent with what we do for BioPCN, and is also
         significantly faster in this case.
         """
-        with torch.enable_grad():
-            # calculate activations and derivatives
-            fz = []
-            fz_der = []
-            for i in range(len(self.dims) - 1):
-                f = self.activation[i]
+        # calculate activations and derivatives
+        fz = []
+        fz_der = []
+        activation, der_activation = self._get_activation_fcts_and_ders()
+        if activation is None:
+            # need to calculate derivatives using autograd
+            with torch.enable_grad():
+                activation = self._get_activation_fcts()
+                for i in range(len(self.dims) - 1):
+                    f = activation[i]
 
-                z = self.z[i].detach().requires_grad_()
-                crt_fz = f(z)
-                crt_fz_der = torch.autograd.grad(
-                    crt_fz, z, grad_outputs=torch.ones_like(z), create_graph=True
-                )[0]
+                    z = self.z[i].detach().requires_grad_()
+                    crt_fz = f(z)
+                    crt_fz_der = torch.autograd.grad(
+                        crt_fz, z, grad_outputs=torch.ones_like(z), create_graph=True
+                    )[0]
 
-                fz.append(crt_fz.detach())
-                fz_der.append(crt_fz_der.detach())
+                    fz.append(crt_fz.detach())
+                    fz_der.append(crt_fz_der.detach())
+        else:
+            with torch.no_grad():
+                for i in range(len(self.dims) - 1):
+                    z = self.z[i].detach().requires_grad_()
+                    fz.append(activation[i](z))
+                    fz_der.append(der_activation[i](z))
 
         with torch.no_grad():
             # calculate error nodes
@@ -384,6 +407,37 @@ class PCNetwork(object):
 
         assert len(res) == n
         return res
+
+    def _get_activation_fcts(self) -> list:
+        """Return list of activation functions for each layer."""
+        activation = []
+
+        for fct in self.activation:
+            if not isinstance(fct, str):
+                activation.append(fct)
+            else:
+                activation.append(_activation_map[fct][0])
+
+        return activation
+
+    def _get_activation_fcts_and_ders(self) -> Tuple[list, list]:
+        """Return tuple of lists, one of activation functions and one of derivatives for
+        each layer.
+        
+        This requires all layers to have the activation function specified by a string.
+        In any other scenario, the function returns `(None, None)`.
+        """
+        activation = []
+        der_activation = []
+
+        for fct in self.activation:
+            if not isinstance(fct, str):
+                return None, None
+            else:
+                activation.append(_activation_map[fct][0])
+                der_activation.append(_activation_map[fct][1])
+
+        return activation, der_activation
 
     def __str__(self) -> str:
         s = (
