@@ -362,7 +362,7 @@ class PCNetwork(object):
 
         These are the weights and biases.
         """
-        params = self.W
+        params = list(self.W)
 
         if self.bias:
             params.extend(self.h)
