@@ -54,14 +54,6 @@ def test_number_of_layers(net):
     assert len(net.h_a) == D
     assert len(net.h_b) == D
 
-    # currents
-    assert len(net.a) == D
-    assert len(net.b) == D
-    assert len(net.n) == D
-
-    # input, hidden, and output activations
-    assert len(net.z) == n
-
 
 def test_apical_weight_sizes(net):
     # apical weights are feedback: start at first hidden layer, end with output layer
@@ -111,25 +103,23 @@ def test_no_bias_b(net_no_bias_b):
 
 
 def test_z_sizes(net):
-    net.forward(torch.FloatTensor([0.3, -0.2, 0.5]))
-    assert [len(_) for _ in net.z] == [3, 4, 5, 2]
+    z = net.forward(torch.FloatTensor([0.3, -0.2, 0.5]))
+    assert [len(_) for _ in z] == [3, 4, 5, 2]
 
 
 def test_all_z_nonzero_after_forward(net):
-    net.forward(torch.FloatTensor([0.3, -0.4, 0.2]))
+    z = net.forward(torch.FloatTensor([0.3, -0.4, 0.2]))
 
-    for z in net.z:
-        assert torch.max(torch.abs(z)) > 1e-4
+    for crt_z in z:
+        assert torch.max(torch.abs(crt_z)) > 1e-4
 
 
 def test_all_z_change_during_forward(net):
     # set some starting values for x
-    net.forward(torch.FloatTensor([-0.2, 0.3, 0.1]))
+    old_z = net.forward(torch.FloatTensor([-0.2, 0.3, 0.1]))
+    new_z = net.forward(torch.FloatTensor([0.3, -0.4, 0.2]))
 
-    old_z = [_.clone() for _ in net.z]
-    net.forward(torch.FloatTensor([0.3, -0.4, 0.2]))
-
-    for old, new in zip(old_z, net.z):
+    for old, new in zip(old_z, new_z):
         assert not torch.any(torch.isclose(old, new))
 
 
@@ -137,82 +127,78 @@ def test_relax_starts_with_forward(net):
     x = torch.FloatTensor([-0.1, 0.2, 0.4])
 
     net.z_it = 0
-    net.relax(x, torch.FloatTensor([0.3, -0.4]))
+    ns = net.relax(x, torch.FloatTensor([0.3, -0.4]))
+    new_z = net.forward(x)
 
-    old_z = [_.clone() for _ in net.z]
-    net.forward(x)
-
-    for old, new in zip(old_z[:-1], net.z[:-1]):
+    for old, new in zip(ns.z[:-1], new_z[:-1]):
         assert torch.all(torch.isclose(old, new))
 
 
 def test_all_z_nonzero_after_relax(net):
-    net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
+    ns = net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
 
-    for z in net.z:
+    for z in ns.z:
         assert torch.max(torch.abs(z)) > 1e-4
 
 
 def test_all_z_change_during_relax(net):
     # set some starting values for x
-    net.forward(torch.FloatTensor([-0.2, 0.3, 0.1]))
+    old_z = net.forward(torch.FloatTensor([-0.2, 0.3, 0.1]))
+    ns = net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
 
-    old_z = [_.clone() for _ in net.z]
-    net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
-
-    for old, new in zip(old_z, net.z):
+    for old, new in zip(old_z, ns.z):
         assert not torch.all(torch.isclose(old, new))
 
 
 def test_interneuron_current_calculation(net):
-    net.forward(torch.FloatTensor([-0.3, 0.1, 0.4]))
-    net.calculate_currents()
+    z = net.forward(torch.FloatTensor([-0.3, 0.1, 0.4]))
+    _, _, n = net.calculate_currents(z)
 
     D = len(net.pyr_dims) - 2
     for i in range(D):
-        expected = net.Q[i] @ net.z[i + 1]
-        assert torch.all(torch.isclose(net.n[i], expected))
+        expected = net.Q[i] @ z[i + 1]
+        assert torch.all(torch.isclose(n[i], expected))
 
 
 def test_basal_current_calculation(net):
-    net.forward(torch.FloatTensor([-0.3, 0.1, 0.4]))
-    net.calculate_currents()
+    z = net.forward(torch.FloatTensor([-0.3, 0.1, 0.4]))
+    _, b, _ = net.calculate_currents(z)
 
     D = len(net.pyr_dims) - 2
     for i in range(D):
-        expected = net.W_b[i] @ net.z[i] + net.h_b[i]
-        assert torch.all(torch.isclose(net.b[i], expected))
+        expected = net.W_b[i] @ z[i] + net.h_b[i]
+        assert torch.all(torch.isclose(b[i], expected))
 
 
 def test_basal_current_calculation_no_bias(net_no_bias_b):
     net = net_no_bias_b
-    net.forward(torch.FloatTensor([-0.3, 0.1]))
-    net.calculate_currents()
+    z = net.forward(torch.FloatTensor([-0.3, 0.1]))
+    _, b, _ = net.calculate_currents(z)
 
     D = len(net.pyr_dims) - 2
     for i in range(D):
-        expected = net.W_b[i] @ net.z[i]
-        assert torch.all(torch.isclose(net.b[i], expected))
+        expected = net.W_b[i] @ z[i]
+        assert torch.all(torch.isclose(b[i], expected))
 
 
 def test_apical_current_calculation(net):
-    net.forward(torch.FloatTensor([-0.3, 0.1, 0.4]))
-    net.calculate_currents()
+    z = net.forward(torch.FloatTensor([-0.3, 0.1, 0.4]))
+    a, _, n = net.calculate_currents(z)
 
     D = len(net.pyr_dims) - 2
     for i in range(D):
-        expected = net.W_a[i].T @ (net.z[i + 2] - net.h_a[i]) - net.Q[i].T @ net.n[i]
-        assert torch.all(torch.isclose(net.a[i], expected))
+        expected = net.W_a[i].T @ (z[i + 2] - net.h_a[i]) - net.Q[i].T @ n[i]
+        assert torch.all(torch.isclose(a[i], expected))
 
 
 def test_apical_current_calculation_no_bias(net):
-    net.forward(torch.FloatTensor([-0.3, 0.1, 0.4]))
-    net.calculate_currents()
+    z = net.forward(torch.FloatTensor([-0.3, 0.1, 0.4]))
+    a, _, n = net.calculate_currents(z)
 
     D = len(net.pyr_dims) - 2
     for i in range(D):
-        expected = net.W_a[i].T @ net.z[i + 2] - net.Q[i].T @ net.n[i]
-        assert torch.all(torch.isclose(net.a[i], expected))
+        expected = net.W_a[i].T @ z[i + 2] - net.Q[i].T @ n[i]
+        assert torch.all(torch.isclose(a[i], expected))
 
 
 @pytest.mark.parametrize("which", ["W_a", "W_b", "Q", "M"])
@@ -257,33 +243,33 @@ def test_initial_biases_are_zero(net):
 
 
 def test_z_grad(net):
-    net.forward(torch.FloatTensor([0.2, -0.5, 0.3]))
-    net.calculate_currents()
-    net.calculate_z_grad()
+    z = net.forward(torch.FloatTensor([0.2, -0.5, 0.3]))
+    a, b, n = net.calculate_currents(z)
+    net.calculate_z_grad(z, a, b, n)
 
     D = len(net.pyr_dims) - 2
     for i in range(D):
-        hidden_apical = net.g_a[i] * net.a[i]
-        hidden_basal = net.g_b[i] * net.b[i]
-        hidden_lateral = net.c_m[i] * net.M[i] @ net.z[i + 1]
-        hidden_leak = net.l_s[i] * net.z[i + 1]
+        hidden_apical = net.g_a[i] * a[i]
+        hidden_basal = net.g_b[i] * b[i]
+        hidden_lateral = net.c_m[i] * net.M[i] @ z[i + 1]
+        hidden_leak = net.l_s[i] * z[i + 1]
 
         expected = hidden_apical + hidden_basal - hidden_lateral - hidden_leak
 
-        assert torch.all(torch.isclose(net.z[i + 1].grad, -expected))
+        assert torch.all(torch.isclose(z[i + 1].grad, -expected))
 
 
 def test_pc_loss_function(net):
-    net.forward(torch.FloatTensor([0.2, -0.5, 0.3]))
-    loss = net.pc_loss().item()
+    z = net.forward(torch.FloatTensor([0.2, -0.5, 0.3]))
+    loss = net.pc_loss(z).item()
 
     expected = 0
     D = len(net.pyr_dims) - 2
     for i in range(D):
-        err_apical = net.z[i + 2] - net.W_a[i] @ net.z[i + 1] - net.h_a[i]
+        err_apical = z[i + 2] - net.W_a[i] @ z[i + 1] - net.h_a[i]
         apical = 0.5 * net.g_a[i] * torch.linalg.norm(err_apical) ** 2
 
-        err_basal = net.z[i + 1] - net.W_b[i] @ net.z[i] - net.h_b[i]
+        err_basal = z[i + 1] - net.W_b[i] @ z[i] - net.h_b[i]
         basal = 0.5 * net.g_b[i] * torch.linalg.norm(err_basal) ** 2
 
         expected += (apical + basal).item()
@@ -297,12 +283,12 @@ def test_apical_weight_gradient(net):
 
     x = torch.FloatTensor([0.2, -0.5, 0.3])
     y = torch.FloatTensor([0.5, -0.3])
-    net.relax(x, y)
-    net.calculate_weight_grad()
+    ns = net.relax(x, y)
+    net.calculate_weight_grad(ns)
 
     D = len(net.pyr_dims) - 2
     for i in range(D):
-        expected = torch.outer(net.z[i + 2] - net.h_a[i], net.z[i + 1]) - net.W_a[i]
+        expected = torch.outer(ns.z[i + 2] - net.h_a[i], ns.z[i + 1]) - net.W_a[i]
         assert torch.all(torch.isclose(net.W_a[i].grad, -expected))
 
 
@@ -312,8 +298,8 @@ def test_apical_weight_gradient_scaling_with_apical_conductance(net):
 
     x = torch.FloatTensor([0.2, -0.5, 0.3])
     y = torch.FloatTensor([0.5, -0.3])
-    net.relax(x, y)
-    net.calculate_weight_grad()
+    ns = net.relax(x, y)
+    net.calculate_weight_grad(ns)
 
     old_W_a_grads = [_.grad.clone().detach() for _ in net.W_a]
 
@@ -321,7 +307,7 @@ def test_apical_weight_gradient_scaling_with_apical_conductance(net):
     net.g_a[0] = 0.5
     net.g_a[1] = 1.3
 
-    net.calculate_weight_grad()
+    net.calculate_weight_grad(ns)
 
     for old, new, g in zip(old_W_a_grads, net.W_a, net.g_a):
         assert torch.all(torch.isfinite(new.grad))
@@ -331,15 +317,15 @@ def test_apical_weight_gradient_scaling_with_apical_conductance(net):
 def test_basal_weight_gradient(net):
     x = torch.FloatTensor([-0.4, 0.5, 0.3])
     y = torch.FloatTensor([0.2, 0.3])
-    net.relax(x, y)
-    net.calculate_weight_grad()
+    ns = net.relax(x, y)
+    net.calculate_weight_grad(ns)
 
     D = len(net.pyr_dims) - 2
     for i in range(D):
-        plateau = net.g_a[i] * torch.outer(net.a[i], net.z[i])
-        lateral = net.c_m[i] * net.M[i] @ net.z[i + 1]
-        self = (net.l_s[i] - net.g_b[i]) * net.z[i + 1]
-        hebbian = torch.outer(self + lateral, net.z[i])
+        plateau = net.g_a[i] * torch.outer(ns.a[i], ns.z[i])
+        lateral = net.c_m[i] * net.M[i] @ ns.z[i + 1]
+        self = (net.l_s[i] - net.g_b[i]) * ns.z[i + 1]
+        hebbian = torch.outer(self + lateral, ns.z[i])
 
         assert torch.all(torch.isclose(-net.W_b[i].grad, plateau - hebbian))
 
@@ -347,24 +333,24 @@ def test_basal_weight_gradient(net):
 def test_interneuron_weight_gradient(net):
     x = torch.FloatTensor([-0.4, 0.5, 0.3])
     y = torch.FloatTensor([0.2, 0.3])
-    net.relax(x, y)
-    net.calculate_weight_grad()
+    ns = net.relax(x, y)
+    net.calculate_weight_grad(ns)
 
     D = len(net.pyr_dims) - 2
     for i in range(D):
-        expected = torch.outer(net.n[i], net.z[i + 1]) - net.Q[i]
+        expected = torch.outer(ns.n[i], ns.z[i + 1]) - net.Q[i]
         assert torch.all(torch.isclose(net.Q[i].grad, -net.g_a[i] * expected))
 
 
 def test_lateral_weight_gradient(net):
     x = torch.FloatTensor([-0.4, 0.5, 0.3])
     y = torch.FloatTensor([0.2, 0.3])
-    net.relax(x, y)
-    net.calculate_weight_grad()
+    ns = net.relax(x, y)
+    net.calculate_weight_grad(ns)
 
     D = len(net.pyr_dims) - 2
     for i in range(D):
-        expected = torch.outer(net.z[i + 1], net.z[i + 1]) - net.M[i]
+        expected = torch.outer(ns.z[i + 1], ns.z[i + 1]) - net.M[i]
         assert torch.all(torch.isclose(net.M[i].grad, -net.c_m[i] * expected))
 
 
@@ -373,16 +359,14 @@ def test_on_shell_after_relax(net):
     x = torch.FloatTensor([-0.4, 0.5, 0.3])
     y = torch.FloatTensor([0.2, 0.3])
     net.z_it = 1000
-    net.relax(x, y)
-
-    net.calculate_currents()
+    ns = net.relax(x, y)
 
     D = len(net.pyr_dims) - 2
     for i in range(D):
-        apical = net.g_a[i] * net.a[i]
-        basal = net.g_b[i] * net.b[i]
-        lateral = net.c_m[i] * net.M[i] @ net.z[i + 1]
-        leak = net.l_s[i] * net.z[i + 1]
+        apical = net.g_a[i] * ns.a[i]
+        basal = net.g_b[i] * ns.b[i]
+        lateral = net.c_m[i] * net.M[i] @ ns.z[i + 1]
+        leak = net.l_s[i] * ns.z[i + 1]
         rhs = apical + basal - lateral - leak
 
         assert torch.max(torch.abs(rhs)) < 1e-5
@@ -428,13 +412,9 @@ def test_cpcn_pc_loss_matches_pcn_loss_with_appropriate_params():
     # pass some data through the network to set the neural activities
     ns1 = pcn.relax(torch.FloatTensor([-0.3, 0.2]), torch.FloatTensor([0.4, -0.2, 0.5]))
 
-    # copy the neural activations over to CPCN
-    for i in range(len(dims)):
-        cpcn.z[i] = ns1.z[i].clone().detach()
-
     # now calculate and compare loss
     pcn_loss = pcn.loss(ns1.z).item()
-    cpcn_loss = cpcn.pc_loss().item()
+    cpcn_loss = cpcn.pc_loss(ns1.z).item()
 
     assert pcn_loss == pytest.approx(cpcn_loss)
 
@@ -462,49 +442,53 @@ def test_str(net):
 
 
 def test_a_size_when_inter_different_from_pyr(net_inter_dims):
-    D = len(net_inter_dims.inter_dims)
+    net = net_inter_dims
+    ns = net.relax(torch.FloatTensor([0.2, 0.3, 0.4]), torch.FloatTensor([-0.5, 0.5]))
+    D = len(net.inter_dims)
     for i in range(D):
-        dim = net_inter_dims.pyr_dims[i + 1]
-        assert len(net_inter_dims.a[i]) == dim
+        dim = net.pyr_dims[i + 1]
+        assert len(ns.a[i]) == dim
 
 
 def test_b_size_when_inter_different_from_pyr(net_inter_dims):
-    D = len(net_inter_dims.inter_dims)
+    net = net_inter_dims
+    ns = net.relax(torch.FloatTensor([0.2, 0.3, 0.4]), torch.FloatTensor([-0.5, 0.5]))
+    D = len(net.inter_dims)
     for i in range(D):
-        dim = net_inter_dims.pyr_dims[i + 1]
-        assert len(net_inter_dims.b[i]) == dim
+        dim = net.pyr_dims[i + 1]
+        assert len(ns.b[i]) == dim
 
 
 def test_n_size_when_inter_different_from_pyr(net_inter_dims):
-    D = len(net_inter_dims.inter_dims)
+    net = net_inter_dims
+    ns = net.relax(torch.FloatTensor([0.2, 0.3, 0.4]), torch.FloatTensor([-0.5, 0.5]))
+    D = len(net.inter_dims)
     for i in range(D):
-        dim = net_inter_dims.inter_dims[i]
-        assert len(net_inter_dims.n[i]) == dim
+        dim = net.inter_dims[i]
+        assert len(ns.n[i]) == dim
 
 
 def test_run_on_batch(net):
     x = torch.FloatTensor([[-0.2, -0.3, 0.5], [0.1, 0.5, -1.2]])
     y = torch.FloatTensor([[1.2, -0.5], [-0.3, -0.4]])
-    net.relax(x, y)
-
-    batch_z = [_.clone().detach() for _ in net.z]
+    ns_batch = net.relax(x, y)
 
     for i in range(len(x)):
-        net.relax(x[i], y[i])
-        for old_z, new_z in zip(batch_z, net.z):
+        ns = net.relax(x[i], y[i])
+        for old_z, new_z in zip(ns_batch.z, ns.z):
             assert torch.allclose(old_z[i], new_z)
 
 
 def test_pc_loss_on_batch(net):
     x = torch.FloatTensor([[-0.2, -0.3, 0.5], [0.1, 0.5, -1.2]])
     y = torch.FloatTensor([[1.2, -0.5], [-0.3, -0.4]])
-    net.relax(x, y)
-    batch_loss = net.pc_loss()
+    ns = net.relax(x, y)
+    batch_loss = net.pc_loss(ns.z)
 
     loss = 0
     for i in range(len(x)):
-        net.relax(x[i], y[i])
-        loss += net.pc_loss()
+        ns = net.relax(x[i], y[i])
+        loss += net.pc_loss(ns.z)
 
     assert batch_loss.item() == pytest.approx(loss.item() / len(x))
 
@@ -512,15 +496,15 @@ def test_pc_loss_on_batch(net):
 def test_weight_grad_on_batch(net):
     x = torch.FloatTensor([[-0.2, -0.3, 0.5], [0.1, 0.5, -1.2]])
     y = torch.FloatTensor([[1.2, -0.5], [-0.3, -0.4]])
-    net.relax(x, y)
-    net.calculate_weight_grad()
+    ns = net.relax(x, y)
+    net.calculate_weight_grad(ns)
 
     batch_W_grad = [_.grad.clone().detach() for _ in net.W_a + net.W_b]
 
     expected_grads = [torch.zeros_like(_) for _ in batch_W_grad]
     for i in range(len(x)):
-        net.relax(x[i], y[i])
-        net.calculate_weight_grad()
+        ns = net.relax(x[i], y[i])
+        net.calculate_weight_grad(ns)
         for k, new_W in enumerate(net.W_a + net.W_b):
             expected_grads[k] += new_W.grad
 
@@ -531,15 +515,15 @@ def test_weight_grad_on_batch(net):
 def test_bias_grad_on_batch(net):
     x = torch.FloatTensor([[-0.2, -0.3, 0.5], [0.1, 0.5, -1.2]])
     y = torch.FloatTensor([[1.2, -0.5], [-0.3, -0.4]])
-    net.relax(x, y)
-    net.calculate_weight_grad()
+    ns = net.relax(x, y)
+    net.calculate_weight_grad(ns)
 
     batch_h_grad = [_.grad.clone().detach() for _ in net.h_a + net.h_b]
 
     expected_grads = [torch.zeros_like(_) for _ in batch_h_grad]
     for i in range(len(x)):
-        net.relax(x[i], y[i])
-        net.calculate_weight_grad()
+        ns = net.relax(x[i], y[i])
+        net.calculate_weight_grad(ns)
         for k, new_h in enumerate(net.h_a + net.h_b):
             expected_grads[k] += new_h.grad
 
@@ -553,8 +537,8 @@ def test_weights_change_when_optimizing_slow_parameters(net):
     old_Ws = [_.clone().detach() for _ in net.W_a + net.W_b + net.Q + net.M]
 
     optimizer = torch.optim.Adam(net.slow_parameters(), lr=1.0)
-    net.relax(x0, y0)
-    net.calculate_weight_grad()
+    ns = net.relax(x0, y0)
+    net.calculate_weight_grad(ns)
     optimizer.step()
 
     new_Ws = net.W_a + net.W_b + net.Q + net.M
@@ -568,8 +552,8 @@ def test_biases_change_when_optimizing_slow_parameters(net):
     old_hs = [_.clone().detach() for _ in net.h_a + net.h_b]
 
     optimizer = torch.optim.Adam(net.slow_parameters(), lr=1.0)
-    net.relax(x0, y0)
-    net.calculate_weight_grad()
+    ns = net.relax(x0, y0)
+    net.calculate_weight_grad(ns)
     optimizer.step()
 
     new_hs = net.h_a + net.h_b
@@ -584,8 +568,8 @@ def test_no_nan_or_inf_after_a_few_learning_steps(net):
     for i in range(4):
         x = torch.Tensor(3).uniform_()
         y = torch.Tensor(2).uniform_()
-        net.relax(x, y)
-        net.calculate_weight_grad()
+        ns = net.relax(x, y)
+        net.calculate_weight_grad(ns)
         optimizer.step()
 
     for W in net.W_a + net.W_b + net.Q + net.M:
@@ -594,24 +578,26 @@ def test_no_nan_or_inf_after_a_few_learning_steps(net):
     for h in net.h_a + net.h_b:
         assert torch.all(torch.isfinite(h))
 
-    for z in net.z:
+    for z in ns.z:
         assert torch.all(torch.isfinite(z))
 
 
-def linear_cpcn_loss(net: LinearBioPCN, reduction: str = "sum") -> torch.Tensor:
+def linear_cpcn_loss(
+    net: LinearBioPCN, z: list, reduction: str = "sum"
+) -> torch.Tensor:
     D = len(net.inter_dims)
-    batch_size = 1 if net.z[0].ndim == 1 else len(net.z[0])
+    batch_size = 1 if z[0].ndim == 1 else len(z[0])
     loss = torch.zeros(batch_size)
     batch_outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
     for i in range(D):
-        z = net.z[i + 1]
+        crt_z = z[i + 1]
 
-        mu = net.z[i] @ net.W_b[i].T + net.h_b[i]
-        error = z - mu
+        mu = z[i] @ net.W_b[i].T + net.h_b[i]
+        error = crt_z - mu
         basal = 0.5 * net.g_b[i] * (error ** 2).sum(dim=-1)
 
-        diff = net.z[i + 2] - net.h_a[i]
-        cross_term = (diff * (z @ net.W_a[i].T)).sum(dim=-1)
+        diff = z[i + 2] - net.h_a[i]
+        cross_term = (diff * (crt_z @ net.W_a[i].T)).sum(dim=-1)
         wa_reg = net.rho[i] * torch.trace(net.W_a[i] @ net.W_a[i].T)
         apical0 = (diff ** 2).sum(dim=-1) - 2 * cross_term + wa_reg
         apical = 0.5 * net.g_a[i] * apical0
@@ -619,15 +605,15 @@ def linear_cpcn_loss(net: LinearBioPCN, reduction: str = "sum") -> torch.Tensor:
         # need to flip this for Q because we're maximizing!!
         # but note that this would lead to incorrect dynamics for the latents!
         # (we get away with it because we don't use this objective for z dynamics)
-        z_cons = batch_outer(z, z) - net.rho[i] * torch.eye(z.shape[-1])
+        z_cons = batch_outer(crt_z, crt_z) - net.rho[i] * torch.eye(crt_z.shape[-1])
         q_prod = net.Q[i].T @ net.Q[i]
         constraint0 = (q_prod @ z_cons).diagonal(dim1=-1, dim2=-2).sum(dim=-1)
         constraint = -0.5 * net.g_a[i] * constraint0
 
         alpha = net.l_s[i] - net.g_b[i]
-        z_reg = 0.5 * alpha * (z ** 2).sum(dim=-1)
+        z_reg = 0.5 * alpha * (crt_z ** 2).sum(dim=-1)
 
-        m_prod = (z * (z @ net.M[i].T)).sum(dim=-1)
+        m_prod = (crt_z * (crt_z @ net.M[i].T)).sum(dim=-1)
         m_reg = torch.trace(net.M[i] @ net.M[i].T)
         lateral0 = -2 * m_prod + m_reg
         lateral = 0.5 * net.c_m[i] * lateral0
@@ -652,36 +638,36 @@ def data() -> tuple:
 
 
 def test_cpcn_loss_reduction_none(net, data):
-    net.relax(data.x, data.y)
-    loss = linear_cpcn_loss(net, reduction="none")
+    ns = net.relax(data.x, data.y)
+    loss = linear_cpcn_loss(net, ns.z, reduction="none")
 
     for i, (crt_x, crt_y) in enumerate(zip(data.x, data.y)):
-        net.relax(crt_x, crt_y)
-        crt_loss = linear_cpcn_loss(net)
+        ns = net.relax(crt_x, crt_y)
+        crt_loss = linear_cpcn_loss(net, ns.z)
 
         assert loss[i].item() == pytest.approx(crt_loss.item())
 
 
 def test_cpcn_loss_reduction_sum(net, data):
-    net.relax(data.x, data.y)
-    loss = linear_cpcn_loss(net, reduction="sum")
+    ns = net.relax(data.x, data.y)
+    loss = linear_cpcn_loss(net, ns.z, reduction="sum")
 
     expected = 0
     for crt_x, crt_y in zip(data.x, data.y):
-        net.relax(crt_x, crt_y)
-        expected += linear_cpcn_loss(net)
+        ns = net.relax(crt_x, crt_y)
+        expected += linear_cpcn_loss(net, ns.z)
 
     assert loss.item() == pytest.approx(expected.item())
 
 
 def test_cpcn_loss_reduction_mean(net, data):
-    net.relax(data.x, data.y)
-    loss = linear_cpcn_loss(net, reduction="mean")
+    ns = net.relax(data.x, data.y)
+    loss = linear_cpcn_loss(net, ns.z, reduction="mean")
 
     expected = 0
     for crt_x, crt_y in zip(data.x, data.y):
-        net.relax(crt_x, crt_y)
-        expected += linear_cpcn_loss(net)
+        ns = net.relax(crt_x, crt_y)
+        expected += linear_cpcn_loss(net, ns.z)
 
     expected /= len(data.x)
     assert loss.item() == pytest.approx(expected.item())
@@ -694,8 +680,8 @@ def test_weight_gradients_match_autograd_from_loss(net, var):
     x0 = torch.FloatTensor([-0.3, -0.2, 0.6])
     y0 = torch.FloatTensor([0.9, 0.3])
 
-    net.relax(x0, y0)
-    net.calculate_weight_grad()
+    ns = net.relax(x0, y0)
+    net.calculate_weight_grad(ns)
 
     manual_grads = [_.grad.clone().detach() for _ in getattr(net, var)]
 
@@ -705,7 +691,7 @@ def test_weight_gradients_match_autograd_from_loss(net, var):
             param.grad.detach_()
             param.grad.zero_()
 
-    loss = linear_cpcn_loss(net)
+    loss = linear_cpcn_loss(net, ns.z)
     loss.backward()
 
     loss_grads = [_.grad.clone().detach() for _ in getattr(net, var)]
@@ -714,12 +700,12 @@ def test_weight_gradients_match_autograd_from_loss(net, var):
         assert torch.allclose(from_manual, from_loss, rtol=1e-2, atol=1e-5)
 
 
-def test_relax_returns_empty_namespace_by_default(net):
+def test_relax_returns_empty_profile_namespace_by_default(net):
     x = torch.FloatTensor([0.2, -0.5, 0.3])
     y = torch.FloatTensor([0.5, -0.3])
     ns = net.relax(x, y)
 
-    assert len(ns.__dict__) == 0
+    assert len(ns.profile.__dict__) == 0
 
 
 def test_relax_loss_profile_is_sequence_of_correct_length(net):
@@ -727,7 +713,7 @@ def test_relax_loss_profile_is_sequence_of_correct_length(net):
     y = torch.FloatTensor([0.5, -0.3])
     ns = net.relax(x, y, pc_loss_profile=True)
 
-    assert len(ns.pc_loss) == net.z_it
+    assert len(ns.profile.pc_loss) == net.z_it
 
 
 def test_relax_loss_profile_is_sequence_of_positive_numbers(net):
@@ -735,15 +721,15 @@ def test_relax_loss_profile_is_sequence_of_positive_numbers(net):
     y = torch.FloatTensor([0.5, -0.3])
     ns = net.relax(x, y, pc_loss_profile=True)
 
-    assert min(ns.pc_loss) > 0
+    assert min(ns.profile.pc_loss) > 0
 
 
 def test_relax_latent_profile_batch_index_added(net):
     x = torch.FloatTensor([0.2, -0.5, 0.3])
     y = torch.FloatTensor([0.5, -0.3])
     ns = net.relax(x, y, latent_profile=True)
-    for var in ns.latent.__dict__:
-        crt_data = getattr(ns.latent, var)
+    for var in ns.profile.__dict__:
+        crt_data = getattr(ns.profile, var)
         for x in crt_data:
             assert x.ndim == 3
             assert x.shape[1] == 1
@@ -754,7 +740,7 @@ def test_relax_latent_profile_has_z_a_b_n(net):
     y = torch.FloatTensor([0.5, -0.3])
     ns = net.relax(x, y, latent_profile=True)
 
-    assert set(ns.latent.__dict__.keys()) == {"z", "a", "b", "n"}
+    assert set(ns.profile.__dict__.keys()) == {"z", "a", "b", "n"}
 
 
 @pytest.mark.parametrize("var", ["z", "a", "b", "n"])
@@ -762,7 +748,7 @@ def test_relax_latent_profile_has_correct_length(net, var):
     x = torch.FloatTensor([0.2, -0.5, 0.3])
     y = torch.FloatTensor([0.5, -0.3])
     ns = net.relax(x, y, latent_profile=True)
-    crt_data = getattr(ns.latent, var)
+    crt_data = getattr(ns.profile, var)
     for x in crt_data:
         assert len(x) == net.z_it
 
@@ -771,14 +757,14 @@ def test_relax_latent_profile_first_layer_of_z_is_input(net):
     x = torch.FloatTensor([-0.1, 0.2, 0.4])
     y = torch.FloatTensor([0.3, -0.4])
     ns = net.relax(x, y, latent_profile=True)
-    assert torch.max(torch.abs(ns.latent.z[0] - x)) < 1e-5
+    assert torch.max(torch.abs(ns.profile.z[0] - x)) < 1e-5
 
 
 def test_relax_latent_profile_last_layer_of_z_is_output(net):
     x = torch.FloatTensor([-0.1, 0.2, 0.4])
     y = torch.FloatTensor([0.3, -0.4])
     ns = net.relax(x, y, latent_profile=True)
-    assert torch.max(torch.abs(ns.latent.z[-1] - y)) < 1e-5
+    assert torch.max(torch.abs(ns.profile.z[-1] - y)) < 1e-5
 
 
 @pytest.mark.parametrize("var", ["z", "a", "b", "n"])
@@ -789,11 +775,11 @@ def test_relax_latent_profile_row_matches_shorter_run(net, var):
 
     new_it = net.z_it // 2
     net.z_it = new_it
-    net.relax(x, y)
+    ns_short = net.relax(x, y)
 
-    long_data = getattr(ns.latent, var)
+    long_data = getattr(ns.profile, var)
     for i, x in enumerate(long_data):
-        short_data = getattr(net, var)
+        short_data = getattr(ns_short, var)
         assert torch.allclose(short_data[i], x[new_it - 1, 0])
 
 
@@ -806,11 +792,11 @@ def test_relax_latent_profile_row_matches_shorter_run_interdims(net_inter_dims, 
 
     new_it = net.z_it // 2
     net.z_it = new_it
-    net.relax(x, y)
+    ns_short = net.relax(x, y)
 
-    long_data = getattr(ns.latent, var)
+    long_data = getattr(ns.profile, var)
     for i, x in enumerate(long_data):
-        short_data = getattr(net, var)
+        short_data = getattr(ns_short, var)
         assert torch.allclose(short_data[i], x[new_it - 1, 0])
 
 
@@ -820,13 +806,13 @@ def test_relax_latent_profile_with_batch(net, var):
     y = torch.FloatTensor([[0.3, -0.4], [0.1, 0.2]])
     ns = net.relax(x, y, latent_profile=True)
 
-    long_data = getattr(ns.latent, var)
+    long_data = getattr(ns.profile, var)
     for k in range(len(x)):
         crt_x = x[k]
         crt_y = y[k]
         crt_ns = net.relax(crt_x, crt_y, latent_profile=True)
 
-        short_data = getattr(crt_ns.latent, var)
+        short_data = getattr(crt_ns.profile, var)
         for x1, x2 in zip(long_data, short_data):
             assert torch.allclose(x1[:, [k], :], x2, rtol=1e-3, atol=1e-5)
 
@@ -835,90 +821,51 @@ def test_relax_latent_profile_with_batch(net, var):
 def test_currents_are_consistent_with_z_after_forward_constraint(net, var):
     x = torch.FloatTensor([-0.1, 0.2, 0.4])
     y = torch.FloatTensor([0.3, -0.4])
-    net.relax(x, y)
+    ns = net.relax(x, y)
 
-    old = [_.clone().detach() for _ in getattr(net, var)]
-    net.calculate_currents()
+    new = SimpleNamespace()
+    new.a, new.b, new.n = net.calculate_currents(ns.z)
 
-    for a, b in zip(old, getattr(net, var)):
+    for a, b in zip(getattr(ns, var), getattr(new, var)):
         assert torch.allclose(a, b)
-
-
-def test_forward_not_inplace_does_not_change_z(net):
-    net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
-    old_z = [_.detach().clone() for _ in net.z]
-
-    net.forward(torch.FloatTensor([0.1, 0.2, 0.3]), inplace=False)
-    for old, new in zip(old_z, net.z):
-        assert torch.allclose(old, new)
-
-
-def test_forward_not_inplace_return_matches_in_place_values(net):
-    x = torch.FloatTensor([0.1, 0.2, 0.3])
-    net.forward(x)
-    inplace_z = [_.detach().clone() for _ in net.z]
-
-    # scramble the z's
-    net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
-
-    # check what happens without inplace
-    new_z = net.forward(x, inplace=False)
-    for old, new in zip(inplace_z, new_z):
-        assert torch.allclose(old, new)
-
-
-def test_forward_not_inplace_return_matches_in_place_values_batch(net):
-    x = torch.FloatTensor([[0.1, 0.2, -0.3], [-0.5, 0.3, 0.2]])
-    net.forward(x)
-    inplace_z = [_.detach().clone() for _ in net.z]
-
-    # scramble the z's
-    net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
-
-    # check what happens without inplace
-    new_z = net.forward(x, inplace=False)
-    for old, new in zip(inplace_z, new_z):
-        assert torch.allclose(old, new)
 
 
 def test_forward_always_returns_all_layers_of_z(net):
     z = net.forward(torch.FloatTensor([0.1, 0.2, 0.3]))
-
-    for x, y in zip(z, net.z):
-        assert torch.allclose(x, y)
+    assert len(z) == len(net.pyr_dims)
 
 
 def test_loss_reduction_none(net, data):
-    net.relax(data.x, data.y)
-    loss = net.pc_loss(reduction="none")
+    ns = net.relax(data.x, data.y)
+    loss = net.pc_loss(ns.z, reduction="none")
 
     for i, (crt_x, crt_y) in enumerate(zip(data.x, data.y)):
-        net.relax(crt_x, crt_y)
-        crt_loss = net.pc_loss()
+        ns = net.relax(crt_x, crt_y)
+        crt_loss = net.pc_loss(ns.z)
 
         assert loss[i].item() == pytest.approx(crt_loss.item())
 
 
 def test_loss_reduction_sum(net, data):
-    net.relax(data.x, data.y)
-    loss = net.pc_loss(reduction="sum")
+    ns = net.relax(data.x, data.y)
+    loss = net.pc_loss(ns.z, reduction="sum")
 
     expected = 0
     for crt_x, crt_y in zip(data.x, data.y):
-        net.relax(crt_x, crt_y)
-        expected += net.pc_loss()
+        ns = net.relax(crt_x, crt_y)
+        expected += net.pc_loss(ns.z)
 
     assert loss.item() == pytest.approx(expected.item())
 
 
 def test_loss_reduction_mean(net, data):
-    net.relax(data.x, data.y)
-    loss = net.pc_loss(reduction="mean")
+    ns = net.relax(data.x, data.y)
+    loss = net.pc_loss(ns.z, reduction="mean")
 
     expected = 0
     for crt_x, crt_y in zip(data.x, data.y):
-        net.relax(crt_x, crt_y)
-        expected += net.pc_loss()
+        ns = net.relax(crt_x, crt_y)
+        expected += net.pc_loss(ns.z)
 
     expected /= len(data.x)
     assert loss.item() == pytest.approx(expected.item())
@@ -929,8 +876,8 @@ def test_loss_reduction_mean(net, data):
 def test_weight_gradients_match_autograd_from_loss_batch(net, data, var, red):
     net.z_it = 1000
 
-    net.relax(data.x, data.y)
-    net.calculate_weight_grad(reduction=red)
+    ns = net.relax(data.x, data.y)
+    net.calculate_weight_grad(ns, reduction=red)
 
     manual_grads = [_.grad.clone().detach() for _ in getattr(net, var)]
 
@@ -940,7 +887,7 @@ def test_weight_gradients_match_autograd_from_loss_batch(net, data, var, red):
             param.grad.detach_()
             param.grad.zero_()
 
-    loss = linear_cpcn_loss(net, reduction=red)
+    loss = linear_cpcn_loss(net, ns.z, reduction=red)
     loss.backward()
 
     loss_grads = [_.grad.clone().detach() for _ in getattr(net, var)]
@@ -976,27 +923,25 @@ def net_nontrivial_constraint():
 def test_foward_constrained_unaffected_by_nontrivial_constraint(net):
     x = torch.FloatTensor([-0.1, 0.2, 0.4])
     y = torch.FloatTensor([0.3, -0.4])
-    net.relax(x, y)
-
-    old_z = [_.detach().clone() for _ in net.z]
+    ns_old = net.relax(x, y)
 
     net.rho[0] = 0.7
     net.rho[1] = 1.5
-    net.relax(x, y)
+    ns_new = net.relax(x, y)
 
-    for old, new in zip(old_z, net.z):
+    for old, new in zip(ns_old.z, ns_new.z):
         assert torch.allclose(old, new)
 
 
 def test_q_gradient_with_nontrivial_constraint(net_nontrivial_constraint, data):
     net = net_nontrivial_constraint
-    net.relax(data.x, data.y)
-    net.calculate_weight_grad()
+    ns = net.relax(data.x, data.y)
+    net.calculate_weight_grad(ns)
 
     outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
     for i in range(len(net.inter_dims)):
         expected = net.g_a[i] * (
-            net.rho[i] * net.Q[i] - outer(net.n[i], net.z[i + 1])
+            net.rho[i] * net.Q[i] - outer(ns.n[i], ns.z[i + 1])
         ).mean(dim=0)
         assert torch.allclose(net.Q[i].grad, expected)
 
@@ -1006,8 +951,8 @@ def test_q_gradient_with_nontrivial_constraint_vs_autograd(net_nontrivial_constr
 
     x = torch.FloatTensor([-0.1, 0.2, 0.4])
     y = torch.FloatTensor([0.3, -0.4])
-    net.relax(x, y)
-    net.calculate_weight_grad()
+    ns = net.relax(x, y)
+    net.calculate_weight_grad(ns)
 
     manual_grads = [_.grad.clone().detach() for _ in net.Q]
 
@@ -1017,7 +962,7 @@ def test_q_gradient_with_nontrivial_constraint_vs_autograd(net_nontrivial_constr
             param.grad.detach_()
             param.grad.zero_()
 
-    loss = linear_cpcn_loss(net)
+    loss = linear_cpcn_loss(net, ns.z)
     loss.backward()
 
     loss_grads = [_.grad.clone().detach() for _ in net.Q]
@@ -1028,14 +973,14 @@ def test_q_gradient_with_nontrivial_constraint_vs_autograd(net_nontrivial_constr
 
 def test_wa_gradient_with_nontrivial_constraint(net_nontrivial_constraint, data):
     net = net_nontrivial_constraint
-    net.relax(data.x, data.y)
-    net.calculate_weight_grad()
+    ns = net.relax(data.x, data.y)
+    net.calculate_weight_grad(ns)
 
     outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
     for i in range(len(net.inter_dims)):
-        diff = net.z[i + 2] - net.h_a[i]
+        diff = ns.z[i + 2] - net.h_a[i]
         expected = net.g_a[i] * (
-            net.rho[i] * net.W_a[i] - outer(diff, net.z[i + 1])
+            net.rho[i] * net.W_a[i] - outer(diff, ns.z[i + 1])
         ).mean(dim=0)
         assert torch.allclose(net.W_a[i].grad, expected)
 
@@ -1045,8 +990,8 @@ def test_wa_gradient_with_nontrivial_constraint_vs_autograd(net_nontrivial_const
 
     x = torch.FloatTensor([-0.1, 0.2, 0.4])
     y = torch.FloatTensor([0.3, -0.4])
-    net.relax(x, y)
-    net.calculate_weight_grad()
+    ns = net.relax(x, y)
+    net.calculate_weight_grad(ns)
 
     manual_grads = [_.grad.clone().detach() for _ in net.W_a]
 
@@ -1056,7 +1001,7 @@ def test_wa_gradient_with_nontrivial_constraint_vs_autograd(net_nontrivial_const
             param.grad.detach_()
             param.grad.zero_()
 
-    loss = linear_cpcn_loss(net)
+    loss = linear_cpcn_loss(net, ns.z)
     loss.backward()
 
     loss_grads = [_.grad.clone().detach() for _ in net.W_a]
@@ -1187,13 +1132,9 @@ def test_from_pcn_with_match_weights():
     # pass some data through the network to set the neural activities
     ns1 = pcn.relax(torch.FloatTensor([-0.3, 0.2]), torch.FloatTensor([0.4, -0.2, 0.5]))
 
-    # copy the neural activations over to CPCN
-    for i in range(len(dims)):
-        cpcn.z[i] = ns1.z[i].clone().detach()
-
     # now calculate and compare loss
     pcn_loss = pcn.loss(ns1.z).item()
-    cpcn_loss = cpcn.pc_loss().item()
+    cpcn_loss = cpcn.pc_loss(ns1.z).item()
 
     assert pcn_loss == pytest.approx(cpcn_loss)
 
@@ -1276,13 +1217,9 @@ def test_from_pcn_copies_over_biases_when_match_weights_is_true():
     # pass some data through the network to set the neural activities
     ns1 = pcn.relax(torch.FloatTensor([-0.3, 0.2]), torch.FloatTensor([0.4, -0.2, 0.5]))
 
-    # copy the neural activations over to CPCN
-    for i in range(len(dims)):
-        cpcn.z[i] = ns1.z[i].clone().detach()
-
     # now calculate and compare loss
     pcn_loss = pcn.loss(ns1.z).item()
-    cpcn_loss = cpcn.pc_loss().item()
+    cpcn_loss = cpcn.pc_loss(ns1.z).item()
 
     assert pcn_loss == pytest.approx(cpcn_loss)
 

@@ -1,7 +1,7 @@
 """Define the linear constrained-predictive coding network."""
 
 from types import SimpleNamespace
-from typing import Sequence, Union, Optional, Callable
+from typing import Sequence, Union, Optional, Callable, Tuple
 
 import torch
 import torch.nn as nn
@@ -115,43 +115,31 @@ class LinearBioPCN:
         self._initialize_intralayer_weights(q0_scale, m0_scale, init_scale_type)
         self._initialize_biases()
 
-        # create neural variables
-        self.a = [torch.zeros(dim) for dim in self.pyr_dims[1:-1]]
-        self.b = [torch.zeros(dim) for dim in self.pyr_dims[1:-1]]
-        self.n = [torch.zeros(dim) for dim in self.inter_dims]
-        self.z = [torch.zeros(dim) for dim in self.pyr_dims]
-
-    def forward(self, x: torch.Tensor, inplace: bool = True) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Do a forward pass with unconstrained output.
 
         This uses the basal weights and biases to propagate the input through the net
-        up to the last hidden layer, then the apical weights to generate the output.
+        up to the last hidden layer. The values in the output layer are generated using
+        the apical weights.
 
         :param x: input sample
-        :param inplace: whether to update the latent-state values in-place; if false,
-            the values are returned instead of the last-layer activation
-        :returns: list of layer activations after the forward pass; if `inplace` is
-            true (the default), this is the same as `self.z`; if `inplace` is false, the
-            returned activations will be the same as if `inplace` were true, but
-            `self.z` will be untouched
+        :returns: list of layer activations after the forward pass
         """
-        z = [x]
+        z = [x.detach()]
         n = len(self.pyr_dims)
         D = n - 2
-        for i in range(D):
-            W = self.W_b[i]
-            h = self.h_b[i] if self.bias_b else 0
+        with torch.no_grad():
+            for i in range(D):
+                W = self.W_b[i]
+                h = self.h_b[i] if self.bias_b else 0
 
+                x = x @ W.T + h
+                z.append(x)
+
+            W = self.W_a[-1]
+            h = self.h_a[-1] if self.bias_a else 0
             x = x @ W.T + h
             z.append(x)
-
-        W = self.W_a[-1]
-        h = self.h_a[-1] if self.bias_a else 0
-        x = x @ W.T + h
-        z.append(x)
-
-        if inplace:
-            self.z = z
 
         return z
 
@@ -172,15 +160,19 @@ class LinearBioPCN:
         :param y: output sample
         :param pc_loss_profile: if true, the evolution of the predictive-coding loss
             during the optimization is returned in the output namespace, under the name
-            `pc_loss`; see `self.pc_loss()`
+            `profile.pc_loss`; see `self.pc_loss()`
         :param latent_profile: if true, the evolution of the latent variables during the
-            optimization is returned as `latent` in the output, with subfields for each
-            variable, e.g., `latent.z`, `latent.n`, etc.; the values are stored after
-            each optimizer step, and they are stored as a list of tensors, one for each
+            optimization is returned as `profile.z`, `profile.a`, `profile.b`, and
+            `profile.n` in the output namespace; the values are stored after each
+            optimizer step, and they are stored as a list of tensors, one for each
             layer, of shape `[n_it, batch_size, n_units]`; note that this output will
             always have a batch index, even if the input and output samples do not
-        :return: if `pc_loss_profile` is true, the predictive-coding loss evaluated
-            before every optimization step; otherwise, `None`
+        :return: namespace with results; this always contains the final layer currents
+            and activations, in lists called `a`, `b`, `n`, and `z`; unlike in the case
+            of the profile, these final values obey the batch conventions from `x` and
+            `y`: i.e., they only have a batch index if `x` and `y` do; the returned
+            namespace also contains a `profile` member, which is either empty, or
+            populated as described above when discussing the `..._profile` arguments;
         """
         assert x.ndim == y.ndim
         if x.ndim > 1:
@@ -189,16 +181,15 @@ class LinearBioPCN:
         # we calculate gradients manually
         with torch.no_grad():
             # start with a simple forward pass to initialize the layer values
-            self.forward(x)
+            z = self.forward(x)
 
             # fix the output layer values
-            # noinspection PyTypeChecker
-            self.z[-1] = y
+            z[-1] = y.detach()
 
             # create an optimizer for the fast parameters
-            fast_optimizer = self.fast_optimizer(self.fast_parameters(), lr=self.z_lr)
+            fast_optimizer = self.fast_optimizer(z[1:-1], lr=self.z_lr)
 
-            # iterate until convergence
+            # create storage for output
             if pc_loss_profile:
                 losses = torch.zeros(self.z_it)
             if latent_profile:
@@ -219,53 +210,61 @@ class LinearBioPCN:
                     torch.zeros((self.z_it, batch_size, dim)) for dim in self.inter_dims
                 ]
 
-            self.calculate_currents()
+            # iterate until convergence
+            a, b, n = self.calculate_currents(z)
             for i in range(self.z_it):
-                self.calculate_z_grad()
-                fast_optimizer.step()
-                self.calculate_currents()
+                self.calculate_z_grad(z, a, b, n)
 
                 if pc_loss_profile:
-                    losses[i] = self.pc_loss().item()
-                if latent_profile:
-                    for k, crt_z in enumerate(self.z):
-                        latent.z[k][i, :, :] = crt_z
-                    for var in ["a", "b", "n"]:
-                        crt_storage = getattr(latent, var)
-                        for k, crt_values in enumerate(getattr(self, var)):
-                            crt_storage[k][i, :, :] = crt_values
+                    losses[i] = self.pc_loss(z).item()
 
-        ns = SimpleNamespace()
-        if pc_loss_profile:
-            ns.pc_loss = losses
+                fast_optimizer.step()
+                a, b, n = self.calculate_currents(z)
+
+                if latent_profile:
+                    for k, crt_z in enumerate(z):
+                        latent.z[k][i, :, :] = crt_z
+                    for k in range(len(self.inter_dims)):
+                        latent.a[k][i, :, :] = a[k]
+                        latent.b[k][i, :, :] = b[k]
+                        latent.n[k][i, :, :] = n[k]
+
+        ns = SimpleNamespace(z=z, a=a, b=b, n=n)
         if latent_profile:
-            ns.latent = latent
+            ns.profile = latent
+        else:
+            ns.profile = SimpleNamespace()
+        if pc_loss_profile:
+            ns.profile.pc_loss = losses
 
         return ns
 
-    def calculate_weight_grad(self, reduction: str = "mean"):
+    def calculate_weight_grad(self, fast: SimpleNamespace, reduction: str = "mean"):
         """Calculate gradients for slow (weight) variables.
 
-        This assumes that the fast variables have been calculated, using `relax()`. The
-        calculated gradients are assigned the `grad` attribute of each weight tensor.
+        The calculated gradients are assigned to the `grad` attribute of each weight
+        tensor.
 
         Note that these gradients do not follow from `self.pc_loss()`! While there is a
         modified loss that can generate both the latent- and weight-gradients in the
         linear case, this is no longer true for non-linear generalizations. We therefore
         use manual gradients in this case, as well, for consistency.
 
+        :param fast: namespace of equilibrium values for the fast variables: the latents
+            `z`; the apical current `a`; the basal current `b`; and the interneuron
+            activities `n`
         :param reduction: reduction to apply to the gradients: `"mean" | "sum"`
         """
-        D = len(self.pyr_dims) - 2
+        D = len(fast.z) - 2
         batch_outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
         red_fct = {"mean": torch.mean, "sum": torch.sum}[reduction]
         for i in range(D):
             # apical
-            pre = self.z[i + 1]
+            pre = fast.z[i + 1]
             if self.bias_a:
-                post = self.z[i + 2] - self.h_a[i]
+                post = fast.z[i + 2] - self.h_a[i]
             else:
-                post = self.z[i + 2]
+                post = fast.z[i + 2]
             grad = self.g_a[i] * (self.rho[i] * self.W_a[i] - batch_outer(post, pre))
             if grad.ndim == self.W_a[i].ndim + 1:
                 # this is a batch evaluation!
@@ -273,12 +272,12 @@ class LinearBioPCN:
             self.W_a[i].grad = grad
 
             # basal
-            plateau = self.g_a[i] * self.a[i]
-            hebbian_self = (self.l_s[i] - self.g_b[i]) * self.z[i + 1]
-            hebbian_lateral = self.c_m[i] * self.z[i + 1] @ self.M[i].T
+            plateau = self.g_a[i] * fast.a[i]
+            hebbian_self = (self.l_s[i] - self.g_b[i]) * fast.z[i + 1]
+            hebbian_lateral = self.c_m[i] * fast.z[i + 1] @ self.M[i].T
             hebbian = hebbian_self + hebbian_lateral
 
-            pre = self.z[i]
+            pre = fast.z[i]
             post = hebbian - plateau
             grad = batch_outer(post, pre)
             if grad.ndim == self.W_b[i].ndim + 1:
@@ -287,8 +286,8 @@ class LinearBioPCN:
             self.W_b[i].grad = grad
 
             # inter
-            pre = self.z[i + 1]
-            post = self.n[i]
+            pre = fast.z[i + 1]
+            post = fast.n[i]
             grad = self.g_a[i] * (self.rho[i] * self.Q[i] - batch_outer(post, pre))
             if grad.ndim == self.Q[i].ndim + 1:
                 # this is a batch evaluation!
@@ -296,7 +295,7 @@ class LinearBioPCN:
             self.Q[i].grad = grad
 
             # lateral
-            pre = self.z[i + 1]
+            pre = fast.z[i + 1]
             post = pre
             grad = self.c_m[i] * (self.M[i] - batch_outer(post, pre))
             if grad.ndim == self.M[i].ndim + 1:
@@ -306,67 +305,74 @@ class LinearBioPCN:
 
             # biases
             if self.bias_a:
-                mu = self.z[i + 1] @ self.W_a[i].T + self.h_a[i]
-                grad = self.g_a[i] * (mu - self.z[i + 2])
+                mu = fast.z[i + 1] @ self.W_a[i].T + self.h_a[i]
+                grad = self.g_a[i] * (mu - fast.z[i + 2])
                 if grad.ndim == self.h_a[i].ndim + 1:
                     # this is a batch evaluation!
                     grad = red_fct(grad, 0)
                 self.h_a[i].grad = grad
             if self.bias_b:
-                mu = self.z[i] @ self.W_b[i].T + self.h_b[i]
-                grad = self.g_b[i] * (mu - self.z[i + 1])
+                mu = fast.z[i] @ self.W_b[i].T + self.h_b[i]
+                grad = self.g_b[i] * (mu - fast.z[i + 1])
                 if grad.ndim == self.h_b[i].ndim + 1:
                     # this is a batch evaluation!
                     grad = red_fct(grad, 0)
                 self.h_b[i].grad = grad
 
-    def calculate_z_grad(self):
+    def calculate_z_grad(self, z: Sequence, a: Sequence, b: Sequence, n: Sequence):
         """Calculate gradients for fast (z) variables.
 
-        This assumes that the currents were calculated using `calculate_currents`. The
-        calculated gradients are assigned to the `grad` attribute of each tensor in
-        `self.z`.
+        This uses the apical (`a`), basal (`b`), and interneuron (`n`) currents,
+        presumably calculated using `calculate_currents`. The calculated gradients are
+        assigned to the `grad` attribute of each tensor in `z`.
 
         Note that these gradients do not follow from `self.pc_loss()`! While there is a
         modified loss that can generate both the latent- and weight-gradients in the
         linear case, this is no longer true for non-linear generalizations. We therefore
         use manual gradients in this case, as well, for consistency.
+
+        :param z: latent-state variables
+        :param a: apical currents
+        :param b: basal currents
+        :param n: interneuron activities
         """
-        D = len(self.pyr_dims) - 2
+        D = len(z) - 2
         for i in range(D):
-            grad_apical = self.g_a[i] * self.a[i]
-            grad_basal = self.g_b[i] * self.b[i]
-            grad_lateral = self.c_m[i] * self.z[i + 1] @ self.M[i].T
-            grad_leak = self.l_s[i] * self.z[i + 1]
+            grad_apical = self.g_a[i] * a[i]
+            grad_basal = self.g_b[i] * b[i]
+            grad_lateral = (self.c_m[i] * z[i + 1] @ self.M[i].T).detach()
+            grad_leak = self.l_s[i] * z[i + 1]
 
-            self.z[i + 1].grad = grad_lateral + grad_leak - grad_apical - grad_basal
+            z[i + 1].grad = grad_lateral + grad_leak - grad_apical - grad_basal
 
-        self.z[0].grad = None
-        self.z[-1].grad = None
-
-    def calculate_currents(self):
+    def calculate_currents(self, z: Sequence) -> Tuple[list, list, list]:
         """Calculate apical, basal, and interneuron currents in all layers.
 
-        Note that this relies on valid `z` values being available in `self.z`. This
-        might require running `self.forward`.
+        :param z: values of latent variables in each layer
+        :return: tuple of lists `(a, b, n)` of apical, basal, and interneuron currents
         """
-        D = len(self.pyr_dims) - 2
+        D = len(z) - 2
+        a = []
+        b = []
+        n = []
         for i in range(D):
-            self.n[i] = self.z[i + 1] @ self.Q[i].T
+            n.append((z[i + 1] @ self.Q[i].T).detach())
 
             if self.bias_b:
-                self.b[i] = self.z[i] @ self.W_b[i].T + self.h_b[i]
+                b.append((z[i] @ self.W_b[i].T + self.h_b[i]).detach())
             else:
-                self.b[i] = self.z[i] @ self.W_b[i].T
+                b.append((z[i] @ self.W_b[i].T).detach())
 
             if self.bias_a:
-                a_feedback = (self.z[i + 2] - self.h_a[i]) @ self.W_a[i]
+                a_feedback = ((z[i + 2] - self.h_a[i]) @ self.W_a[i]).detach()
             else:
-                a_feedback = self.z[i + 2] @ self.W_a[i]
-            a_inter = self.n[i] @ self.Q[i]
-            self.a[i] = a_feedback - a_inter
+                a_feedback = (z[i + 2] @ self.W_a[i]).detach()
+            a_inter = n[i] @ self.Q[i]
+            a.append((a_feedback - a_inter).detach())
 
-    def pc_loss(self, reduction: str = "mean") -> torch.Tensor:
+        return a, b, n
+
+    def pc_loss(self, z: Sequence, reduction: str = "mean") -> torch.Tensor:
         """Estimate predictive-coding loss given current activation values.
 
         Note that this loss does *not* generate either the latent-state gradients from
@@ -389,22 +395,23 @@ class LinearBioPCN:
         This loss is minimized whenever the predictive-coding loss is minimized. (That
         is, at the minimum, `W_a == W_b`.)
 
+        :param z: values of latent variables in each layer
         :param reduction: reduction to apply to the output: `"none" | "mean" | "sum"`
         """
-        batch_size = 1 if self.z[0].ndim == 1 else len(self.z[0])
-        loss = torch.zeros(batch_size).to(self.z[0].device)
+        batch_size = 1 if z[0].ndim == 1 else len(z[0])
+        loss = torch.zeros(batch_size).to(z[0].device)
 
-        D = len(self.pyr_dims) - 2
+        D = len(z) - 2
         for i in range(D):
-            mu_a = self.z[i + 1] @ self.W_a[i].T
+            mu_a = z[i + 1] @ self.W_a[i].T
             if self.bias_a:
                 mu_a += self.h_a[i]
-            apical = self.g_a[i] * ((self.z[i + 2] - mu_a) ** 2).sum(dim=-1)
+            apical = self.g_a[i] * ((z[i + 2] - mu_a) ** 2).sum(dim=-1)
 
-            mu_b = self.z[i] @ self.W_b[i].T
+            mu_b = z[i] @ self.W_b[i].T
             if self.bias_b:
                 mu_b += self.h_b[i]
-            basal = self.g_b[i] * ((self.z[i + 1] - mu_b) ** 2).sum(dim=-1)
+            basal = self.g_b[i] * ((z[i + 1] - mu_b) ** 2).sum(dim=-1)
 
             loss += apical + basal
 
@@ -417,13 +424,6 @@ class LinearBioPCN:
 
         loss /= 2
         return loss
-
-    def fast_parameters(self) -> list:
-        """Create list of parameters to optimize in the fast phase.
-
-        These are the activations in all the hidden layers.
-        """
-        return self.z[1:-1]
 
     def slow_parameters(self) -> list:
         """Create list of parameters to optimize in the slow phase.
@@ -463,22 +463,19 @@ class LinearBioPCN:
         """Moves and/or casts the parameters and buffers."""
         with torch.no_grad():
             for i in range(len(self.W_a)):
-                self.W_a[i] = self.W_a[i].to(*args, **kwargs).requires_grad_()
-                self.W_b[i] = self.W_b[i].to(*args, **kwargs).requires_grad_()
+                self.W_a[i] = self.W_a[i].to(*args, **kwargs).detach().requires_grad_()
+                self.W_b[i] = self.W_b[i].to(*args, **kwargs).detach().requires_grad_()
                 if self.bias_a:
-                    self.h_a[i] = self.h_a[i].to(*args, **kwargs).requires_grad_()
+                    self.h_a[i] = (
+                        self.h_a[i].to(*args, **kwargs).detach().requires_grad_()
+                    )
                 if self.bias_b:
-                    self.h_b[i] = self.h_b[i].to(*args, **kwargs).requires_grad_()
+                    self.h_b[i] = (
+                        self.h_b[i].to(*args, **kwargs).detach().requires_grad_()
+                    )
 
-                self.Q[i] = self.Q[i].to(*args, **kwargs).requires_grad_()
-                self.M[i] = self.M[i].to(*args, **kwargs).requires_grad_()
-
-                self.a[i] = self.a[i].to(*args, **kwargs)
-                self.b[i] = self.b[i].to(*args, **kwargs)
-                self.n[i] = self.n[i].to(*args, **kwargs)
-
-            for i in range(len(self.z)):
-                self.z[i] = self.z[i].to(*args, **kwargs)
+                self.Q[i] = self.Q[i].to(*args, **kwargs).detach().requires_grad_()
+                self.M[i] = self.M[i].to(*args, **kwargs).detach().requires_grad_()
 
         return self
 
