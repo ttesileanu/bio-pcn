@@ -14,7 +14,7 @@ class LinearBioPCN:
 
     def __init__(
         self,
-        pyr_dims: Sequence,
+        dims: Sequence,
         inter_dims: Optional[Sequence] = None,
         z_it: int = 100,
         z_lr: float = 0.01,
@@ -34,9 +34,9 @@ class LinearBioPCN:
     ):
         """Initialize the network.
 
-        :param pyr_dims: number of pyramidal neurons in each layer
+        :param dims: number of pyramidal neurons in each layer
         :param inter_dims: number of interneurons per hidden layer; default: same as
-            `pyr_dims[1:-1]`
+            `dims[1:-1]`
         :param z_it: maximum number of iterations for fast (z) dynamics
         :param z_lr: starting learning rate for fast (z) dynamics
         :param g_a: apical conductances
@@ -60,14 +60,14 @@ class LinearBioPCN:
         """
         self.training = True
 
-        self.pyr_dims = np.copy(pyr_dims)
-        assert len(self.pyr_dims) > 2
+        self.dims = np.copy(dims)
+        assert len(self.dims) > 2
 
         if inter_dims is None:
-            inter_dims = self.pyr_dims[1:-1]
+            inter_dims = self.dims[1:-1]
         self.inter_dims = np.copy(inter_dims)
 
-        assert len(self.pyr_dims) == len(self.inter_dims) + 2
+        assert len(self.dims) == len(self.inter_dims) + 2
 
         self.z_it = z_it
         self.z_lr = z_lr
@@ -97,18 +97,18 @@ class LinearBioPCN:
         self.Q = []
         self.M = []
 
-        D = len(self.pyr_dims) - 2
+        D = len(self.dims) - 2
         for i in range(D):
-            self.W_a.append(torch.Tensor(self.pyr_dims[i + 2], self.pyr_dims[i + 1]))
+            self.W_a.append(torch.Tensor(self.dims[i + 2], self.dims[i + 1]))
             if self.bias_a:
-                self.h_a.append(torch.Tensor(self.pyr_dims[i + 2]))
+                self.h_a.append(torch.Tensor(self.dims[i + 2]))
 
-            self.W_b.append(torch.Tensor(self.pyr_dims[i + 1], self.pyr_dims[i]))
+            self.W_b.append(torch.Tensor(self.dims[i + 1], self.dims[i]))
             if self.bias_b:
-                self.h_b.append(torch.Tensor(self.pyr_dims[i + 1]))
+                self.h_b.append(torch.Tensor(self.dims[i + 1]))
 
-            self.Q.append(torch.Tensor(self.inter_dims[i], self.pyr_dims[i + 1]))
-            self.M.append(torch.Tensor(self.pyr_dims[i + 1], self.pyr_dims[i + 1]))
+            self.Q.append(torch.Tensor(self.inter_dims[i], self.dims[i + 1]))
+            self.M.append(torch.Tensor(self.dims[i + 1], self.dims[i + 1]))
 
         # initialize weights and biases
         self._initialize_interlayer_weights(wa0_scale, wb0_scale, init_scale_type)
@@ -126,7 +126,7 @@ class LinearBioPCN:
         :returns: list of layer activations after the forward pass
         """
         z = [x.detach()]
-        n = len(self.pyr_dims)
+        n = len(self.dims)
         D = n - 2
         with torch.no_grad():
             for i in range(D):
@@ -196,15 +196,13 @@ class LinearBioPCN:
                 batch_size = x.shape[0] if x.ndim > 1 else 1
                 latent = SimpleNamespace()
                 latent.z = [
-                    torch.zeros((self.z_it, batch_size, dim)) for dim in self.pyr_dims
+                    torch.zeros((self.z_it, batch_size, dim)) for dim in self.dims
                 ]
                 latent.a = [
-                    torch.zeros((self.z_it, batch_size, dim))
-                    for dim in self.pyr_dims[1:-1]
+                    torch.zeros((self.z_it, batch_size, dim)) for dim in self.dims[1:-1]
                 ]
                 latent.b = [
-                    torch.zeros((self.z_it, batch_size, dim))
-                    for dim in self.pyr_dims[1:-1]
+                    torch.zeros((self.z_it, batch_size, dim)) for dim in self.dims[1:-1]
                 ]
                 latent.n = [
                     torch.zeros((self.z_it, batch_size, dim)) for dim in self.inter_dims
@@ -536,7 +534,7 @@ class LinearBioPCN:
 
     def _expand_per_layer(self, theta) -> np.ndarray:
         """Expand a quantity to per-layer, if needed, and convert to numpy array."""
-        D = len(self.pyr_dims) - 2
+        D = len(self.dims) - 2
 
         if torch.is_tensor(theta):
             assert theta.ndim == 1
@@ -556,7 +554,7 @@ class LinearBioPCN:
 
     def __str__(self) -> str:
         s = (
-            f"LinearBioPCN(pyr_dims={str(self.pyr_dims)}, "
+            f"LinearBioPCN(dims={str(self.dims)}, "
             f"inter_dims={str(self.inter_dims)}, "
             f"bias_a={self.bias_a}, "
             f"bias_b={self.bias_b}"
@@ -567,7 +565,7 @@ class LinearBioPCN:
     def __repr__(self) -> str:
         s = (
             f"LinearBioPCN("
-            f"pyr_dims={repr(self.pyr_dims)}, "
+            f"dims={repr(self.dims)}, "
             f"inter_dims={repr(self.inter_dims)}, "
             f"bias_a={self.bias_a}, "
             f"bias_b={self.bias_b}, "

@@ -37,13 +37,13 @@ def net_no_bias_b():
 
 
 def test_default_interneuron_dims_match_pyramidal(net):
-    assert len(net.inter_dims) == len(net.pyr_dims) - 2
-    assert all(net.inter_dims == net.pyr_dims[1:-1])
+    assert len(net.inter_dims) == len(net.dims) - 2
+    assert all(net.inter_dims == net.dims[1:-1])
 
 
 def test_number_of_layers(net):
     # number of hidden layers
-    n = len(net.pyr_dims)
+    n = len(net.dims)
     D = n - 2
 
     # weights and biases
@@ -154,7 +154,7 @@ def test_interneuron_current_calculation(net):
     z = net.forward(torch.FloatTensor([-0.3, 0.1, 0.4]))
     _, _, n = net.calculate_currents(z)
 
-    D = len(net.pyr_dims) - 2
+    D = len(net.dims) - 2
     for i in range(D):
         expected = net.Q[i] @ z[i + 1]
         assert torch.all(torch.isclose(n[i], expected))
@@ -164,7 +164,7 @@ def test_basal_current_calculation(net):
     z = net.forward(torch.FloatTensor([-0.3, 0.1, 0.4]))
     _, b, _ = net.calculate_currents(z)
 
-    D = len(net.pyr_dims) - 2
+    D = len(net.dims) - 2
     for i in range(D):
         expected = net.W_b[i] @ z[i] + net.h_b[i]
         assert torch.all(torch.isclose(b[i], expected))
@@ -175,7 +175,7 @@ def test_basal_current_calculation_no_bias(net_no_bias_b):
     z = net.forward(torch.FloatTensor([-0.3, 0.1]))
     _, b, _ = net.calculate_currents(z)
 
-    D = len(net.pyr_dims) - 2
+    D = len(net.dims) - 2
     for i in range(D):
         expected = net.W_b[i] @ z[i]
         assert torch.all(torch.isclose(b[i], expected))
@@ -185,7 +185,7 @@ def test_apical_current_calculation(net):
     z = net.forward(torch.FloatTensor([-0.3, 0.1, 0.4]))
     a, _, n = net.calculate_currents(z)
 
-    D = len(net.pyr_dims) - 2
+    D = len(net.dims) - 2
     for i in range(D):
         expected = net.W_a[i].T @ (z[i + 2] - net.h_a[i]) - net.Q[i].T @ n[i]
         assert torch.all(torch.isclose(a[i], expected))
@@ -195,7 +195,7 @@ def test_apical_current_calculation_no_bias(net):
     z = net.forward(torch.FloatTensor([-0.3, 0.1, 0.4]))
     a, _, n = net.calculate_currents(z)
 
-    D = len(net.pyr_dims) - 2
+    D = len(net.dims) - 2
     for i in range(D):
         expected = net.W_a[i].T @ z[i + 2] - net.Q[i].T @ n[i]
         assert torch.all(torch.isclose(a[i], expected))
@@ -247,7 +247,7 @@ def test_z_grad(net):
     a, b, n = net.calculate_currents(z)
     net.calculate_z_grad(z, a, b, n)
 
-    D = len(net.pyr_dims) - 2
+    D = len(net.dims) - 2
     for i in range(D):
         hidden_apical = net.g_a[i] * a[i]
         hidden_basal = net.g_b[i] * b[i]
@@ -264,7 +264,7 @@ def test_pc_loss_function(net):
     loss = net.pc_loss(z).item()
 
     expected = 0
-    D = len(net.pyr_dims) - 2
+    D = len(net.dims) - 2
     for i in range(D):
         err_apical = z[i + 2] - net.W_a[i] @ z[i + 1] - net.h_a[i]
         apical = 0.5 * net.g_a[i] * torch.linalg.norm(err_apical) ** 2
@@ -286,7 +286,7 @@ def test_apical_weight_gradient(net):
     ns = net.relax(x, y)
     net.calculate_weight_grad(ns)
 
-    D = len(net.pyr_dims) - 2
+    D = len(net.dims) - 2
     for i in range(D):
         expected = torch.outer(ns.z[i + 2] - net.h_a[i], ns.z[i + 1]) - net.W_a[i]
         assert torch.all(torch.isclose(net.W_a[i].grad, -expected))
@@ -320,7 +320,7 @@ def test_basal_weight_gradient(net):
     ns = net.relax(x, y)
     net.calculate_weight_grad(ns)
 
-    D = len(net.pyr_dims) - 2
+    D = len(net.dims) - 2
     for i in range(D):
         plateau = net.g_a[i] * torch.outer(ns.a[i], ns.z[i])
         lateral = net.c_m[i] * net.M[i] @ ns.z[i + 1]
@@ -336,7 +336,7 @@ def test_interneuron_weight_gradient(net):
     ns = net.relax(x, y)
     net.calculate_weight_grad(ns)
 
-    D = len(net.pyr_dims) - 2
+    D = len(net.dims) - 2
     for i in range(D):
         expected = torch.outer(ns.n[i], ns.z[i + 1]) - net.Q[i]
         assert torch.all(torch.isclose(net.Q[i].grad, -net.g_a[i] * expected))
@@ -348,7 +348,7 @@ def test_lateral_weight_gradient(net):
     ns = net.relax(x, y)
     net.calculate_weight_grad(ns)
 
-    D = len(net.pyr_dims) - 2
+    D = len(net.dims) - 2
     for i in range(D):
         expected = torch.outer(ns.z[i + 1], ns.z[i + 1]) - net.M[i]
         assert torch.all(torch.isclose(net.M[i].grad, -net.c_m[i] * expected))
@@ -361,7 +361,7 @@ def test_on_shell_after_relax(net):
     net.z_it = 1000
     ns = net.relax(x, y)
 
-    D = len(net.pyr_dims) - 2
+    D = len(net.dims) - 2
     for i in range(D):
         apical = net.g_a[i] * ns.a[i]
         basal = net.g_b[i] * ns.b[i]
@@ -446,7 +446,7 @@ def test_a_size_when_inter_different_from_pyr(net_inter_dims):
     ns = net.relax(torch.FloatTensor([0.2, 0.3, 0.4]), torch.FloatTensor([-0.5, 0.5]))
     D = len(net.inter_dims)
     for i in range(D):
-        dim = net.pyr_dims[i + 1]
+        dim = net.dims[i + 1]
         assert len(ns.a[i]) == dim
 
 
@@ -455,7 +455,7 @@ def test_b_size_when_inter_different_from_pyr(net_inter_dims):
     ns = net.relax(torch.FloatTensor([0.2, 0.3, 0.4]), torch.FloatTensor([-0.5, 0.5]))
     D = len(net.inter_dims)
     for i in range(D):
-        dim = net.pyr_dims[i + 1]
+        dim = net.dims[i + 1]
         assert len(ns.b[i]) == dim
 
 
@@ -832,7 +832,7 @@ def test_currents_are_consistent_with_z_after_forward_constraint(net, var):
 
 def test_forward_always_returns_all_layers_of_z(net):
     z = net.forward(torch.FloatTensor([0.1, 0.2, 0.3]))
-    assert len(z) == len(net.pyr_dims)
+    assert len(z) == len(net.dims)
 
 
 def test_loss_reduction_none(net, data):
