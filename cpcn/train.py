@@ -149,8 +149,8 @@ class Trainer:
                 x, y, pc_loss_profile=need_profile, latent_profile=need_profile
             )
             with torch.no_grad():
-                pc_loss = self.net.pc_loss().item()
-            self.net.calculate_weight_grad()
+                pc_loss = self.net.pc_loss(batch_results.z).item()
+            self.net.calculate_weight_grad(batch_results)
             optimizer.step()
 
             # use and train classifier, if we have one
@@ -239,7 +239,7 @@ class Trainer:
         """Get prediction, using the classifier (if any), and train the classifier (if
         any).
         """
-        z_fwd = self.net.forward(x, inplace=False)
+        z_fwd = self.net.forward(x)
         if self.classifier is not None:
             y_pred = self.classifier(z_fwd[self.classifier_dim])
 
@@ -350,8 +350,9 @@ class Trainer:
         }
 
         # add CUDA memory usage, if CUDA is being used
-        if self.net.z[0].is_cuda:
-            memory = torch.cuda.memory_allocated(self.net.z[0].device)
+        param = self.net.slow_parameters()[0]
+        if param.is_cuda:
+            memory = torch.cuda.memory_allocated(param.device)
             progress_info["cuda_mem"] = pretty_size(memory)
 
         return progress_info
@@ -397,7 +398,8 @@ class Trainer:
         
         :param classifier: the classifier to use
         :param classifier_dim: which layer of `net` to pass into the classifier
-        :param device: device to send the classifier to; default: `net.z[0].device`
+        :param device: device to send the classifier to; default: the device to which
+            the first output of `net.slow_parameters()` is assigned
         """
         self.classifier = classifier
         if isinstance(self.classifier, str):
@@ -443,7 +445,7 @@ class Trainer:
             self.classifier_dim = classifier_dim
 
         if device is None:
-            device = self.net.z[0].device
+            device = self.net.slow_parameters()[0].device
         self.classifier = self.classifier.to(device)
 
         return self
@@ -947,11 +949,11 @@ def evaluate(
     loss = []
     accuracy = []
     for x, y in loader:
-        net.relax(x, y)
-        loss.append(net.pc_loss().item())
+        ns = net.relax(x, y)
+        loss.append(net.pc_loss(ns.z).item())
 
         # figure out model predictions
-        z_pred = net.forward(x, inplace=False)
+        z_pred = net.forward(x)
         if classifier is not None:
             y_pred = classifier(z_pred[classifier_dim])
         else:
