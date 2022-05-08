@@ -102,8 +102,8 @@ pcn_profile = pcn.relax(*sample, pc_loss_profile=True, latent_profile=True)
 biopcn_profile = biopcn.relax(*sample, pc_loss_profile=True, latent_profile=True)
 
 with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
-    fwd_pcn = pcn.forward(sample[0], inplace=False)
-    fwd_biopcn = biopcn.forward(sample[0], inplace=False)
+    fwd_pcn = pcn.forward(sample[0])
+    fwd_biopcn = biopcn.forward(sample[0])
 
     ax1.scatter(fwd_pcn[1].detach(), fwd_biopcn[1].detach())
     ax1.set_xlabel("PCN")
@@ -115,7 +115,7 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
     ax1.set_xlim(-crt_lim, crt_lim)
     ax1.set_ylim(-crt_lim, crt_lim)
 
-    ax2.scatter(pcn.z[1].detach(), biopcn.z[1])
+    ax2.scatter(pcn_profile.z[1].detach(), biopcn_profile.z[1])
     ax2.set_xlabel("PCN")
     ax2.set_ylabel("BioPCN")
     ax2.set_title("latent $z_1$ after relax")
@@ -125,8 +125,8 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
     ax2.set_xlim(-crt_lim, crt_lim)
     ax2.set_ylim(-crt_lim, crt_lim)
 
-    sigma_pcn = torch.std(pcn.z[1].detach())
-    sigma_biopcn = torch.std(biopcn.z[1].detach())
+    sigma_pcn = torch.std(pcn_profile.z[1].detach())
+    sigma_biopcn = torch.std(biopcn_profile.z[1].detach())
     ax2.plot([-sigma_pcn, sigma_pcn], [0, 0], ls="--", c="k")
     ax2.plot([0, 0], [-sigma_biopcn, sigma_biopcn], ls="--", c="k")
 
@@ -136,18 +136,18 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
 # %%
 
 with dv.FigureManager(2, 2) as (_, (axs_loss, axs_z)):
-    axs_loss[0].plot(pcn_profile.pc_loss.detach())
+    axs_loss[0].plot(pcn_profile.profile.pc_loss.detach())
     axs_loss[0].set_title("PCN")
-    axs_loss[1].plot(biopcn_profile.pc_loss)
+    axs_loss[1].plot(biopcn_profile.profile.pc_loss)
     axs_loss[1].set_title("BioPCN")
 
     for ax in axs_loss:
         ax.set_xlabel("step")
         ax.set_ylabel("predictive-coding loss")
 
-    axs_z[0].plot(pcn_profile.latent.z[1].detach()[:, -1, :])
+    axs_z[0].plot(pcn_profile.profile.z[1].detach()[:, -1, :])
     axs_z[0].set_title("PCN")
-    axs_z[1].plot(biopcn_profile.latent.z[1].detach()[:, -1, :])
+    axs_z[1].plot(biopcn_profile.profile.z[1].detach()[:, -1, :])
     axs_z[1].set_title("BioPCN")
 
     for ax in axs_z:
@@ -168,13 +168,13 @@ biopcn_pred = torch.linalg.solve(biopcn_coeff_mat, biopcn_target).T
 
 with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
     ax1.plot([-1.5, 1.5], [-1.5, 1.5], c="k", ls="--")
-    ax1.scatter(pcn_pred.detach().ravel(), pcn.z[1].detach().ravel())
+    ax1.scatter(pcn_pred.detach().ravel(), pcn_profile.z[1].detach().ravel())
     ax1.set_xlabel("$z$ from analytics")
     ax1.set_ylabel("$z$ from relax")
     ax1.set_title("PCN")
 
     ax2.plot([-1.5, 1.5], [-1.5, 1.5], c="k", ls="--")
-    ax2.scatter(biopcn_pred.detach().ravel(), biopcn.z[1].detach().ravel())
+    ax2.scatter(biopcn_pred.detach().ravel(), biopcn_profile.z[1].detach().ravel())
     ax2.set_xlabel("$z$ from analytics")
     ax2.set_ylabel("$z$ from relax")
     ax2.set_title("BioPCN")

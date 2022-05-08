@@ -42,7 +42,6 @@ torch.manual_seed(123)
 
 net = PCNetwork(
     dims,
-    # activation=lambda _: _,
     activation="none",
     z_lr=z_lr,
     z_it=z_it,

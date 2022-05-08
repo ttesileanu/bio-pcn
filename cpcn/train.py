@@ -269,15 +269,12 @@ class Trainer:
                 epoch=epoch,
                 batch=batch,
                 net=self.net,
+                batch_results=batch_results,
                 classifier=self.classifier,
                 trainer=self,
                 train_loss=pc_loss,
                 train_accuracy=accuracy,
             )
-            if hasattr(batch_results, "pc_loss"):
-                batch_ns.pc_loss_profile = batch_results.pc_loss
-            if hasattr(batch_results, "latent"):
-                batch_ns.latent_profile = batch_results.latent
             for observer in observers:
                 observer(batch_ns)
 
@@ -404,10 +401,7 @@ class Trainer:
         self.classifier = classifier
         if isinstance(self.classifier, str):
             if self.classifier in ["linear", "linear_softmax", "linear_relu"]:
-                if hasattr(self.net, "dims"):
-                    dims = self.net.dims
-                else:
-                    dims = self.net.pyr_dims
+                dims = self.net.dims
                 linear = torch.nn.Linear(dims[self.classifier_dim], dims[-1])
                 if self.classifier == "linear":
                     layers = OrderedDict([("linear", linear)])
@@ -421,10 +415,7 @@ class Trainer:
                     )
                 self.classifier = torch.nn.Sequential(layers)
             elif self.classifier == "mlp":
-                if hasattr(self.net, "dims"):
-                    dims = self.net.dims
-                else:
-                    dims = self.net.pyr_dims
+                dims = self.net.dims
 
                 n_in = dims[self.classifier_dim]
                 n_out = dims[-1]
@@ -487,6 +478,7 @@ class Trainer:
             batch:          the index of the batch that was just processed
             epoch:          an epoch index
             net:            the network that is being optimized
+            batch_results:  namespace returned by `net.relax()`
             trainer:        the `Trainer` object, `self`
             classifier:     network used for classifier output (if any)
             train_loss:     (predictive-coding) loss on training set
@@ -606,12 +598,13 @@ class Trainer:
     ) -> "Trainer":
         """Add per-sample monitoring.
         
-        This is used to store values of parameters that change with each sample. The
-        values will be stored in `self.history` during calls to `self.run()`.
+        This is used to store values of parameters that change with each sample -- these
+        are the variables returned by `net.relax()`. The values will be stored in
+        `self.history` during calls to `self.run()`.
 
         :param name: the name to be used in `self.history` for the stored values
-        :param vars: variables to track; these should be names of attributes of the
-            model under training
+        :param vars: variables to track; these should be names of attributes contained
+            in the namespace returned by `net.relax()`
         :param condition: condition to be fulfilled for values to be stored; see
             `add_observer`
         :param every: store every `every` batches; see `add_observer`
@@ -794,7 +787,7 @@ class Trainer:
                 continue
 
             var, *parts = var.split(":")
-            value = getattr(ns.net, var)
+            value = getattr(ns.batch_results, var)
             if len(parts) > 0:
                 # this is part of a multi-layer variable
                 value = value[int(parts[-1])]
@@ -808,7 +801,10 @@ class Trainer:
             if sel is not None:
                 value = value[sel]
             # send to CPU so this does not take up GPU memory!
-            target.append(value.to("cpu").clone())
+            # target.append(value.to("cpu").clone())
+            # this should not require cloning since these variables are recreated for
+            # every batch
+            target.append(value.to("cpu"))
 
         if sel is None:
             count = batch_size
@@ -832,7 +828,7 @@ class Trainer:
                 continue
 
             var, *parts = var.split(":")
-            value = getattr(ns.latent_profile, var)
+            value = getattr(ns.batch_results.profile, var)
             if len(parts) > 0:
                 # this is part of a multi-layer variable
                 # note: this is always true for the fast dynamics
@@ -841,9 +837,12 @@ class Trainer:
             # relax should ensure that we always have a batch index
             assert value.ndim > 1
             # send to CPU so this does not take up GPU memory!
-            value = value.detach().to("cpu").clone()
+            # value = value.detach().to("cpu").clone()
+            # this should not require cloning since these variables are recreated for
+            # every batch
+            value = value.detach().to("cpu")
             # index0 = fast-dynamics iterations; index1 = sample index
-            value = value.transpose_(0, 1)
+            value = value.transpose(0, 1)
             if batch_size is None:
                 batch_size = len(value)
             if sel is not None:
@@ -868,13 +867,22 @@ class Trainer:
         network itself. The argument `size` can be used to override this behavior. If
         `size` is provided, `self.net` is never accessed.
         """
+        if type == "sample":
+            # need a trick to find out the number of layers for the fast variables
+            device = self.net.slow_parameters()[0].device
+            test_in = torch.zeros(self.net.dims[0], device=device)
+            test_out = torch.zeros(self.net.dims[-1], device=device)
+            test_object = self.net.relax(test_in, test_out)
+        else:
+            test_object = self.net
+
         storage = {}
         for var in vars:
             layered = False
             crt_size = size
             if size == 0:
                 if "." not in var:
-                    value = getattr(self.net, var)
+                    value = getattr(test_object, var)
                 else:
                     if not var.startswith("classifier"):
                         raise ValueError(f"can't parse variable name, {var}")
