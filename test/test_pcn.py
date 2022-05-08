@@ -527,7 +527,7 @@ def data() -> tuple:
 @pytest.mark.parametrize("red", ["sum", "mean"])
 def test_calculate_weight_grad_matches_backward_on_loss(net, red, data):
     ns = net.relax(data.x, data.y)
-    net.calculate_weight_grad(ns.z, reduction=red)
+    net.calculate_weight_grad(ns, reduction=red)
 
     old_grad = [_.grad.clone().detach() for _ in net.slow_parameters()]
 
@@ -605,7 +605,7 @@ def net_constraint():
 def test_q_gradient_with_constraint(net_constraint, data):
     net = net_constraint
     ns = net.relax(data.x, data.y)
-    net.calculate_weight_grad(ns.z)
+    net.calculate_weight_grad(ns)
 
     outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
     for i in range(len(net.dims) - 2):
@@ -628,7 +628,7 @@ def test_calculate_weight_grad_matches_backward_on_loss_constraint(
 ):
     net = net_constraint
     ns = net.relax(data.x, data.y)
-    net.calculate_weight_grad(ns.z, reduction=red)
+    net.calculate_weight_grad(ns, reduction=red)
 
     old_grad = [_.grad.clone().detach() for _ in net.slow_parameters()]
 

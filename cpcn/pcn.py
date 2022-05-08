@@ -304,7 +304,7 @@ class PCNetwork(object):
                     grad0 = grad0.mean(dim=0)
                 z[i].grad = grad0
 
-    def calculate_weight_grad(self, z: Sequence, reduction: str = "mean"):
+    def calculate_weight_grad(self, fast: SimpleNamespace, reduction: str = "mean"):
         """Calculate gradients for slow (weight) variables.
 
         This is equivalent to using `backward()` on the output from `self.loss()`
@@ -313,13 +313,14 @@ class PCNetwork(object):
         optimization needs to maximize over `Q` while minimizing over all the other
         paramters.
 
-        :param z: values of latent variables in each layer
+        :param fast: namespace containing values of latent variables in each layer
+            (under `fast.z`)
         :param reduction: reduction to apply to the gradients: `"mean" | "sum"`
         """
         for param in self.slow_parameters():
             param.grad = None
 
-        loss = self.loss(z, reduction=reduction)
+        loss = self.loss(fast.z, reduction=reduction)
         loss.backward()
 
         # need to flip the sign of the Lagrange multipliers, if any
