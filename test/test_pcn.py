@@ -24,7 +24,6 @@ def net_nb():
 def test_number_of_layers(net):
     assert len(net.W) == 2
     assert len(net.h) == 2
-    assert len(net.z) == 3
 
 
 def test_weight_sizes(net):
@@ -33,54 +32,49 @@ def test_weight_sizes(net):
 
 
 def test_z_sizes(net):
-    net.forward(torch.FloatTensor([0.3, -0.2, 0.5]))
-    assert [len(_) for _ in net.z] == [3, 4, 2]
+    z = net.forward(torch.FloatTensor([0.3, -0.2, 0.5]))
+    assert [len(_) for _ in z] == [3, 4, 2]
 
 
 def test_all_zs_nonzero_after_relax(net):
-    net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
+    ns = net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
 
-    for z in net.z:
+    for z in ns.z:
         assert torch.max(torch.abs(z)) > 1e-4
 
 
 def test_all_zs_change_during_relax(net):
     # set some starting values for z
-    net.forward(torch.FloatTensor([-0.2, 0.3, 0.1]))
+    old_z = net.forward(torch.FloatTensor([-0.2, 0.3, 0.1]))
+    ns = net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
 
-    old_z = [_.clone() for _ in net.z]
-    net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
-
-    for old, new in zip(old_z, net.z):
+    for old, new in zip(old_z, ns.z):
         assert not torch.all(torch.isclose(old, new))
 
 
 def test_all_zs_not_nonzero_after_forward(net):
-    net.forward(torch.FloatTensor([0.3, -0.4, 0.2]))
+    z = net.forward(torch.FloatTensor([0.3, -0.4, 0.2]))
 
-    for z in net.z:
-        assert torch.max(torch.abs(z)) > 1e-4
+    for crt_z in z:
+        assert torch.max(torch.abs(crt_z)) > 1e-4
 
 
 def test_all_zs_change_during_forward(net):
     # set some starting values for z
-    net.forward(torch.FloatTensor([-0.2, 0.3, 0.1]))
+    old_z = net.forward(torch.FloatTensor([-0.2, 0.3, 0.1]))
+    new_z = net.forward(torch.FloatTensor([0.3, -0.4, 0.2]))
 
-    old_z = [_.clone() for _ in net.z]
-    net.forward(torch.FloatTensor([0.3, -0.4, 0.2]))
-
-    for old, new in zip(old_z, net.z):
+    for old, new in zip(old_z, new_z):
         assert not torch.any(torch.isclose(old, new))
 
 
 def test_forward_result_is_stationary_point_of_relax(net):
     x0 = torch.FloatTensor([0.5, -0.7, 0.2])
-    net.forward(x0)
+    old_z = net.forward(x0)
 
-    old_z = [_.clone().detach() for _ in net.z]
-    net.relax(old_z[0], old_z[-1])
+    ns = net.relax(old_z[0], old_z[-1])
 
-    for old, new in zip(old_z, net.z):
+    for old, new in zip(old_z, ns.z):
         assert torch.allclose(old, new)
 
 
@@ -91,10 +85,10 @@ def test_weights_and_biases_change_when_optimizing_slow_parameters(net):
     old_bs = [_.clone().detach() for _ in net.h]
 
     optimizer = torch.optim.Adam(net.slow_parameters(), lr=1.0)
-    net.relax(x0, y0)
+    ns = net.relax(x0, y0)
 
     optimizer.zero_grad()
-    loss = net.loss()
+    loss = net.loss(ns.z)
     loss.backward()
     optimizer.step()
 
@@ -106,9 +100,9 @@ def test_weights_and_biases_change_when_optimizing_slow_parameters(net):
 def test_loss_is_nonzero_after_relax(net):
     x0 = torch.FloatTensor([-0.3, -0.2, 0.6])
     y0 = torch.FloatTensor([0.9, 0.3])
-    net.relax(x0, y0)
+    ns = net.relax(x0, y0)
 
-    assert net.loss().abs().item() > 1e-6
+    assert net.loss(ns.z).abs().item() > 1e-6
 
 
 def test_forward_does_not_change_weights_and_biases(net):
@@ -133,11 +127,11 @@ def test_relax_does_not_change_weights_and_biases(net):
 
 def test_loss_does_not_change_weights_and_biases(net):
     # ensure the z variables have valid values assigned to them
-    net.forward(torch.FloatTensor([0.1, 0.2, 0.3]))
+    z = net.forward(torch.FloatTensor([0.1, 0.2, 0.3]))
 
     old_Ws = [_.clone().detach() for _ in net.W]
     old_hs = [_.clone().detach() for _ in net.h]
-    net.loss()
+    net.loss(z)
 
     for old_W, old_b, new_W, new_b in zip(old_Ws, old_hs, net.W, net.h):
         assert torch.allclose(old_W, new_W)
@@ -151,17 +145,17 @@ def test_no_nan_or_inf_after_a_few_learning_steps(net):
     for i in range(4):
         x = torch.Tensor(3).uniform_()
         y = torch.Tensor(2).uniform_()
-        net.relax(x, y)
+        ns = net.relax(x, y)
 
         optimizer.zero_grad()
-        net.loss().backward()
+        net.loss(ns.z).backward()
         optimizer.step()
 
     for W, h in zip(net.W, net.h):
         assert torch.all(torch.isfinite(W))
         assert torch.all(torch.isfinite(h))
 
-    for z in net.z:
+    for z in ns.z:
         assert torch.all(torch.isfinite(z))
 
 
@@ -175,22 +169,22 @@ def test_forward_output_depends_on_input(net):
 
 def test_forward_sets_first_element_of_z_to_input_sample(net):
     x0 = torch.FloatTensor([0.5, 0.2, 0.1])
-    net.forward(x0)
-    assert torch.allclose(net.z[0], x0)
+    z = net.forward(x0)
+    assert torch.allclose(z[0], x0)
 
 
 def test_relax_sets_first_element_of_z_to_input_sample(net):
     x0 = torch.FloatTensor([0.5, 0.2, 0.1])
     y0 = torch.FloatTensor([0.5, -0.2])
-    net.relax(x0, y0)
-    assert torch.allclose(net.z[0], x0)
+    ns = net.relax(x0, y0)
+    assert torch.allclose(ns.z[0], x0)
 
 
 def test_relax_sets_last_element_of_z_to_output_sample(net):
     x0 = torch.FloatTensor([0.5, 0.2, 0.1])
     y0 = torch.FloatTensor([0.5, -0.2])
-    net.relax(x0, y0)
-    assert torch.allclose(net.z[-1], y0)
+    ns = net.relax(x0, y0)
+    assert torch.allclose(ns.z[-1], y0)
 
 
 def test_initialize_values_same_when_torch_seed_is_same():
@@ -242,10 +236,10 @@ def test_weights_reproducible_for_same_seed_after_learning():
     net = PCNetwork(dims)
     optimizer = torch.optim.Adam(net.slow_parameters())
     for crt_x, crt_y in zip(x, y):
-        net.relax(crt_x, crt_y)
+        ns = net.relax(crt_x, crt_y)
 
         optimizer.zero_grad()
-        net.loss().backward()
+        net.loss(ns.z).backward()
         optimizer.step()
 
     var1 = [_.clone().detach() for _ in net.W]
@@ -255,10 +249,10 @@ def test_weights_reproducible_for_same_seed_after_learning():
     net = PCNetwork(dims)
     optimizer = torch.optim.Adam(net.slow_parameters())
     for crt_x, crt_y in zip(x, y):
-        net.relax(crt_x, crt_y)
+        ns = net.relax(crt_x, crt_y)
 
         optimizer.zero_grad()
-        net.loss().backward()
+        net.loss(ns.z).backward()
         optimizer.step()
 
     var2 = [_.clone().detach() for _ in net.W]
@@ -279,10 +273,10 @@ def test_learning_effects_are_different_for_subsequent_runs():
     net = PCNetwork(dims)
     optimizer = torch.optim.Adam(net.slow_parameters())
     for crt_x, crt_y in zip(x, y):
-        net.relax(crt_x, crt_y)
+        ns = net.relax(crt_x, crt_y)
 
         optimizer.zero_grad()
-        net.loss().backward()
+        net.loss(ns.z).backward()
         optimizer.step()
 
     var1 = [_.clone().detach() for _ in net.W]
@@ -291,10 +285,10 @@ def test_learning_effects_are_different_for_subsequent_runs():
     net = PCNetwork(dims)
     optimizer = torch.optim.Adam(net.slow_parameters())
     for crt_x, crt_y in zip(x, y):
-        net.relax(crt_x, crt_y)
+        ns = net.relax(crt_x, crt_y)
 
         optimizer.zero_grad()
-        net.loss().backward()
+        net.loss(ns.z).backward()
         optimizer.step()
 
     var2 = [_.clone().detach() for _ in net.W]
@@ -318,10 +312,10 @@ def test_training_with_batches_of_size_one():
 
     optimizer = torch.optim.SGD(net.slow_parameters(), lr=lr)
     for crt_x, crt_y in zip(x, y):
-        net.relax(crt_x, crt_y)
+        ns = net.relax(crt_x, crt_y)
 
         optimizer.zero_grad()
-        net.loss().backward()
+        net.loss(ns.z).backward()
         optimizer.step()
 
     test_x = torch.FloatTensor([0.5, 0.2])
@@ -335,10 +329,10 @@ def test_training_with_batches_of_size_one():
     for crt_x, crt_y in zip(x, y):
         crt_x_batch = crt_x[None, :]
         crt_y_batch = crt_y[None, :]
-        net.relax(crt_x_batch, crt_y_batch)
+        ns = net.relax(crt_x_batch, crt_y_batch)
 
         optimizer.zero_grad()
-        net.loss().backward()
+        net.loss(ns.z).backward()
         optimizer.step()
 
     test_x = torch.FloatTensor([0.5, 0.2])
@@ -370,10 +364,10 @@ def test_training_with_batches_of_nontrivial_size():
     # lr when training sample by sample
     optimizer = torch.optim.SGD(net.slow_parameters(), lr=lr / n_samples)
     for crt_x, crt_y in zip(x, y):
-        net.relax(crt_x, crt_y)
+        ns = net.relax(crt_x, crt_y)
 
         optimizer.zero_grad()
-        net.loss().backward()
+        net.loss(ns.z).backward()
         optimizer.step()
 
     test_x = torch.FloatTensor([0.5, -0.2])
@@ -387,10 +381,10 @@ def test_training_with_batches_of_nontrivial_size():
     for crt_x1, crt_x2, crt_y1, crt_y2 in zip(x[::2], x[1::2], y[::2], y[1::2]):
         crt_x_batch = torch.vstack((crt_x1, crt_x2))
         crt_y_batch = torch.vstack((crt_y1, crt_y2))
-        net.relax(crt_x_batch, crt_y_batch)
+        ns = net.relax(crt_x_batch, crt_y_batch)
 
         optimizer.zero_grad()
-        net.loss().backward()
+        net.loss(ns.z).backward()
         optimizer.step()
 
     test_x = torch.FloatTensor([0.5, -0.2])
@@ -402,9 +396,9 @@ def test_training_with_batches_of_nontrivial_size():
         assert torch.allclose(crt_out, crt_out_batch, rtol=0.01, atol=1e-5)
 
 
-def test_relax_returns_empty_namespace_by_default(net):
+def test_relax_returns_empty_profile_by_default(net):
     ns = net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
-    assert len(ns.__dict__) == 0
+    assert len(ns.profile.__dict__) == 0
 
 
 def test_relax_loss_profile_is_sequence_of_correct_length(net):
@@ -414,7 +408,7 @@ def test_relax_loss_profile_is_sequence_of_correct_length(net):
         pc_loss_profile=True,
     )
 
-    assert len(ns.pc_loss) == net.z_it
+    assert len(ns.profile.pc_loss) == net.z_it
 
 
 def test_relax_loss_profile_is_sequence_of_positive_numbers(net):
@@ -424,7 +418,7 @@ def test_relax_loss_profile_is_sequence_of_positive_numbers(net):
         pc_loss_profile=True,
     )
 
-    assert min(ns.pc_loss) > 0
+    assert min(ns.profile.pc_loss) > 0
 
 
 def test_relax_loss_profile_has_last_elem_smaller_than_first(net):
@@ -434,7 +428,7 @@ def test_relax_loss_profile_has_last_elem_smaller_than_first(net):
         pc_loss_profile=True,
     )
 
-    assert ns.pc_loss[-1] < ns.pc_loss[0]
+    assert ns.profile.pc_loss[-1] < ns.profile.pc_loss[0]
 
 
 def test_relax_latent_profile_batch_index_added(net):
@@ -443,7 +437,7 @@ def test_relax_latent_profile_batch_index_added(net):
         torch.FloatTensor([0.3, -0.4]),
         latent_profile=True,
     )
-    for z in ns.latent.z:
+    for z in ns.profile.z:
         assert z.ndim == 3
         assert z.shape[1] == 1
 
@@ -454,7 +448,7 @@ def test_relax_latent_profile_has_correct_length(net):
         torch.FloatTensor([0.3, -0.4]),
         latent_profile=True,
     )
-    for z in ns.latent.z:
+    for z in ns.profile.z:
         assert len(z) == net.z_it
 
 
@@ -462,27 +456,27 @@ def test_relax_latent_profile_first_layer_is_input(net):
     x = torch.FloatTensor([-0.1, 0.2, 0.4])
     y = torch.FloatTensor([0.3, -0.4])
     ns = net.relax(x, y, latent_profile=True)
-    assert torch.max(torch.abs(ns.latent.z[0] - x)) < 1e-5
+    assert torch.max(torch.abs(ns.profile.z[0] - x)) < 1e-5
 
 
 def test_relax_latent_profile_last_layer_is_output(net):
     x = torch.FloatTensor([-0.1, 0.2, 0.4])
     y = torch.FloatTensor([0.3, -0.4])
     ns = net.relax(x, y, latent_profile=True)
-    assert torch.max(torch.abs(ns.latent.z[-1] - y)) < 1e-5
+    assert torch.max(torch.abs(ns.profile.z[-1] - y)) < 1e-5
 
 
 def test_relax_latent_profile_row_matches_shorter_run(net):
     x = torch.FloatTensor([-0.1, 0.2, 0.4])
     y = torch.FloatTensor([0.3, -0.4])
-    ns = net.relax(x, y, latent_profile=True)
+    ns0 = net.relax(x, y, latent_profile=True)
 
     new_it = 2
     net.z_it = new_it
-    net.relax(x, y)
+    ns = net.relax(x, y)
 
-    for i, z in enumerate(ns.latent.z):
-        assert torch.allclose(net.z[i], z[new_it - 1, 0])
+    for i, z in enumerate(ns0.profile.z):
+        assert torch.allclose(ns.z[i], z[new_it - 1, 0])
 
 
 def test_relax_latent_profile_with_batch(net):
@@ -495,7 +489,7 @@ def test_relax_latent_profile_with_batch(net):
         crt_y = y[k]
         crt_ns = net.relax(crt_x, crt_y, latent_profile=True)
 
-        for z1, z2 in zip(ns.latent.z, crt_ns.latent.z):
+        for z1, z2 in zip(ns.profile.z, crt_ns.profile.z):
             assert torch.allclose(z1[:, [k], :], z2, atol=1e-5, rtol=1e-5)
 
 
@@ -518,9 +512,9 @@ def test_str(net):
 
 
 def test_pc_loss_matches_loss(net):
-    net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
+    ns = net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
 
-    assert net.loss().item() == pytest.approx(net.pc_loss().item())
+    assert net.loss(ns.z).item() == pytest.approx(net.pc_loss(ns.z).item())
 
 
 @pytest.fixture
@@ -532,8 +526,8 @@ def data() -> tuple:
 
 @pytest.mark.parametrize("red", ["sum", "mean"])
 def test_calculate_weight_grad_matches_backward_on_loss(net, red, data):
-    net.relax(data.x, data.y)
-    net.calculate_weight_grad(reduction=red)
+    ns = net.relax(data.x, data.y)
+    net.calculate_weight_grad(ns.z, reduction=red)
 
     old_grad = [_.grad.clone().detach() for _ in net.slow_parameters()]
 
@@ -541,106 +535,61 @@ def test_calculate_weight_grad_matches_backward_on_loss(net, red, data):
         if param.grad is not None:
             param.grad.zero_()
 
-    loss = net.loss(reduction=red)
+    loss = net.loss(ns.z, reduction=red)
     loss.backward()
 
     for old, new_param in zip(old_grad, net.slow_parameters()):
         assert torch.allclose(old, new_param.grad)
 
 
-def test_forward_not_inplace_does_not_change_z(net):
-    net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
-    old_z = [_.detach().clone() for _ in net.z]
-
-    net.forward(torch.FloatTensor([0.1, 0.2, 0.3]), inplace=False)
-    for old, new in zip(old_z, net.z):
-        assert torch.allclose(old, new)
-
-
-def test_forward_not_inplace_return_matches_in_place_values(net):
-    x = torch.FloatTensor([0.1, 0.2, 0.3])
-    net.forward(x)
-    inplace_z = [_.detach().clone() for _ in net.z]
-
-    # scramble the z's
-    net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
-
-    # check what happens without inplace
-    new_z = net.forward(x, inplace=False)
-    for old, new in zip(inplace_z, new_z):
-        assert torch.allclose(old, new)
-
-
-def test_forward_not_inplace_return_matches_in_place_values_batch(net):
-    x = torch.FloatTensor([[0.1, 0.2, -0.3], [-0.5, 0.3, 0.2]])
-    net.forward(x)
-    inplace_z = [_.detach().clone() for _ in net.z]
-
-    # scramble the z's
-    net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
-
-    # check what happens without inplace
-    new_z = net.forward(x, inplace=False)
-    for old, new in zip(inplace_z, new_z):
-        assert torch.allclose(old, new)
-
-
-def test_forward_always_returns_all_layers_of_z(net):
-    z = net.forward(torch.FloatTensor([0.1, 0.2, 0.3]))
-
-    for x, y in zip(z, net.z):
-        assert torch.allclose(x, y)
-
-
 def test_forward_result_is_stationary_point_of_relax_nobias(net_nb):
     x0 = torch.FloatTensor([0.5, -0.7, 0.2])
-    net_nb.forward(x0)
+    old_z = net_nb.forward(x0)
 
-    old_z = [_.clone().detach() for _ in net_nb.z]
-    net_nb.relax(old_z[0], old_z[-1])
+    ns = net_nb.relax(old_z[0], old_z[-1])
 
-    for old, new in zip(old_z, net_nb.z):
+    for old, new in zip(old_z, ns.z):
         assert torch.allclose(old, new)
 
 
 def test_forward_maps_zero_to_zero_when_nobias(net_nb):
     x0 = torch.FloatTensor([0.0, 0.0, 0.0])
-    net_nb.forward(x0)
+    z = net_nb.forward(x0)
 
-    assert torch.max(torch.abs(net_nb.z[-1])) < 1e-5
+    assert torch.max(torch.abs(z[-1])) < 1e-5
 
 
 def test_loss_reduction_none(net, data):
-    net.relax(data.x, data.y)
-    loss = net.loss(reduction="none")
+    ns = net.relax(data.x, data.y)
+    loss = net.loss(ns.z, reduction="none")
 
     for i, (crt_x, crt_y) in enumerate(zip(data.x, data.y)):
-        net.relax(crt_x, crt_y)
-        crt_loss = net.loss()
+        ns = net.relax(crt_x, crt_y)
+        crt_loss = net.loss(ns.z)
 
         assert loss[i].item() == pytest.approx(crt_loss.item())
 
 
 def test_loss_reduction_sum(net, data):
-    net.relax(data.x, data.y)
-    loss = net.loss(reduction="sum")
+    ns = net.relax(data.x, data.y)
+    loss = net.loss(ns.z, reduction="sum")
 
     expected = 0
     for crt_x, crt_y in zip(data.x, data.y):
-        net.relax(crt_x, crt_y)
-        expected += net.loss()
+        ns = net.relax(crt_x, crt_y)
+        expected += net.loss(ns.z)
 
     assert loss.item() == pytest.approx(expected.item())
 
 
 def test_loss_reduction_mean(net, data):
-    net.relax(data.x, data.y)
-    loss = net.loss(reduction="mean")
+    ns = net.relax(data.x, data.y)
+    loss = net.loss(ns.z, reduction="mean")
 
     expected = 0
     for crt_x, crt_y in zip(data.x, data.y):
-        net.relax(crt_x, crt_y)
-        expected += net.loss()
+        ns = net.relax(crt_x, crt_y)
+        expected += net.loss(ns.z)
 
     expected /= len(data.x)
     assert loss.item() == pytest.approx(expected.item())
@@ -655,8 +604,8 @@ def net_constraint():
 
 def test_q_gradient_with_constraint(net_constraint, data):
     net = net_constraint
-    net.relax(data.x, data.y)
-    net.calculate_weight_grad()
+    ns = net.relax(data.x, data.y)
+    net.calculate_weight_grad(ns.z)
 
     outer = lambda a, b: a.unsqueeze(-1) @ b.unsqueeze(-2)
     for i in range(len(net.dims) - 2):
@@ -665,7 +614,7 @@ def test_q_gradient_with_constraint(net_constraint, data):
             fct = torch.tanh
         elif fct == "none":
             fct = lambda _: _
-        fz = fct(net.z[i + 1])
+        fz = fct(ns.z[i + 1])
         n = fz @ net.Q[i].T
         expected = (1 / net.variances[i]) * (net.rho[i] * net.Q[i] - outer(n, fz)).mean(
             dim=0
@@ -678,8 +627,8 @@ def test_calculate_weight_grad_matches_backward_on_loss_constraint(
     net_constraint, red, data
 ):
     net = net_constraint
-    net.relax(data.x, data.y)
-    net.calculate_weight_grad(reduction=red)
+    ns = net.relax(data.x, data.y)
+    net.calculate_weight_grad(ns.z, reduction=red)
 
     old_grad = [_.grad.clone().detach() for _ in net.slow_parameters()]
 
@@ -687,7 +636,7 @@ def test_calculate_weight_grad_matches_backward_on_loss_constraint(
         if param.grad is not None:
             param.grad.zero_()
 
-    loss = net.loss(reduction=red)
+    loss = net.loss(ns.z, reduction=red)
     loss.backward()
     for Q in net.Q:
         Q.grad = -Q.grad
@@ -702,26 +651,26 @@ def test_loss_ignore_constraint_works(data):
     dims = [3, 4, 5, 2]
     rho = [0.2, 1.5]
     net1 = PCNetwork(dims, constrained=True, rho=rho)
-    net1.relax(data.x, data.y)
-    loss1 = net1.loss(ignore_constraint=True)
+    ns1 = net1.relax(data.x, data.y)
+    loss1 = net1.loss(ns1.z, ignore_constraint=True)
 
     torch.manual_seed(seed)
     net2 = PCNetwork(dims, constrained=True, rho=rho)
-    net2.relax(data.x, data.y)
+    ns2 = net2.relax(data.x, data.y)
     net2.constrained = False
-    loss2 = net2.loss()
+    loss2 = net2.loss(ns2.z)
 
     assert loss1.item() == pytest.approx(loss2.item())
 
 
 def test_pc_loss_ignores_constraint_by_default(net_constraint, data):
-    net_constraint.relax(data.x, data.y)
-    loss1 = net_constraint.loss()
-    loss1_i = net_constraint.loss(ignore_constraint=True)
+    ns = net_constraint.relax(data.x, data.y)
+    loss1 = net_constraint.loss(ns.z)
+    loss1_i = net_constraint.loss(ns.z, ignore_constraint=True)
 
     assert loss1.item() != pytest.approx(loss1_i.item())
 
-    loss2 = net_constraint.pc_loss()
+    loss2 = net_constraint.pc_loss(ns.z)
     assert loss2.item() == pytest.approx(loss1_i.item())
 
 
@@ -733,14 +682,14 @@ def get_sample_z_gradient(net):
 
     x = torch.FloatTensor([-0.1, 0.3, 0.4])
     y = torch.FloatTensor([0.3, -0.4])
-    net.relax(x, y)
+    ns = net.relax(x, y)
 
     # XXX after one step only the last hidden layer should have non-zero gradient when
     #     we start with state from `net.forward()`... that should be enough for this
     #     test, though
-    grad_z = [_.grad.detach().clone() for _ in net.z[1:-1]]
+    grad_z = [_.grad.detach().clone() for _ in ns.z[1:-1]]
 
-    return grad_z
+    return ns.z, grad_z
 
 
 @pytest.fixture
@@ -752,17 +701,17 @@ def net_ntv():  # non-trivial variances
 
 def test_z_dynamics(net_ntv):
     net = net_ntv
-    grad_z = get_sample_z_gradient(net)
+    z, grad_z = get_sample_z_gradient(net)
     activation = torch.tanh
     der_activation = lambda _: 1 / torch.cosh(_) ** 2
     for i in range(1, len(net.dims) - 1):
-        mu = activation(net.z[i - 1]) @ net.W[i - 1].T + net.h[i - 1]
-        diff = net.z[i] - mu
+        mu = activation(z[i - 1]) @ net.W[i - 1].T + net.h[i - 1]
+        diff = z[i] - mu
         grad1 = diff / net.variances[i - 1]
 
-        mu = activation(net.z[i]) @ net.W[i].T + net.h[i]
-        diff = net.z[i + 1] - mu
-        der = der_activation(net.z[i])
+        mu = activation(z[i]) @ net.W[i].T + net.h[i]
+        diff = z[i + 1] - mu
+        der = der_activation(z[i])
         grad2 = der * (diff @ net.W[i]) / net.variances[i]
         expected = grad1 - grad2
         assert torch.allclose(expected, grad_z[i - 1])
@@ -776,19 +725,19 @@ def test_z_dynamics_uses_correct_sign_for_constraint(net_constraint):
         net.activation[i] = activation
         net.variances[i] = variances[i]
 
-    grad_z = get_sample_z_gradient(net)
+    z, grad_z = get_sample_z_gradient(net)
     der_activation = lambda _: 1 / torch.cosh(_) ** 2
     for i in range(1, len(net.dims) - 1):
-        mu = activation(net.z[i - 1]) @ net.W[i - 1].T + net.h[i - 1]
-        diff = net.z[i] - mu
+        mu = activation(z[i - 1]) @ net.W[i - 1].T + net.h[i - 1]
+        diff = z[i] - mu
         grad1 = diff / net.variances[i - 1]
 
-        mu = activation(net.z[i]) @ net.W[i].T + net.h[i]
-        diff = net.z[i + 1] - mu
-        der = der_activation(net.z[i])
+        mu = activation(z[i]) @ net.W[i].T + net.h[i]
+        diff = z[i + 1] - mu
+        der = der_activation(z[i])
         grad2 = der * (diff @ net.W[i]) / net.variances[i]
 
-        fz = activation(net.z[i])
+        fz = activation(z[i])
         grad3 = der * (fz @ net.Q[i - 1].T @ net.Q[i - 1]) / net.variances[i - 1]
 
         expected = grad1 - grad2 + grad3
@@ -882,10 +831,10 @@ def test_choose_activation_function_using_string():
     x = torch.FloatTensor([0.3, -0.5])
     y = torch.FloatTensor([1.3, 0.5, -0.5, 0.8])
 
-    net1.relax(x, y)
-    net2.relax(x, y)
+    ns1 = net1.relax(x, y)
+    ns2 = net2.relax(x, y)
 
-    for z1, z2 in zip(net1.z, net2.z):
+    for z1, z2 in zip(ns1.z, ns2.z):
         assert torch.allclose(z1, z2)
 
 
@@ -902,8 +851,8 @@ def test_default_activation_function_is_tanh():
     x = torch.FloatTensor([0.3, -0.5])
     y = torch.FloatTensor([1.3, 0.5, -0.5, 0.8])
 
-    net1.relax(x, y)
-    net2.relax(x, y)
+    ns1 = net1.relax(x, y)
+    ns2 = net2.relax(x, y)
 
-    for z1, z2 in zip(net1.z, net2.z):
+    for z1, z2 in zip(ns1.z, ns2.z):
         assert torch.allclose(z1, z2)

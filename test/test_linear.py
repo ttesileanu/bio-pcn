@@ -426,14 +426,14 @@ def test_cpcn_pc_loss_matches_pcn_loss_with_appropriate_params():
         cpcn.W_b[i] = pcn.W[i].clone().detach()
 
     # pass some data through the network to set the neural activities
-    pcn.relax(torch.FloatTensor([-0.3, 0.2]), torch.FloatTensor([0.4, -0.2, 0.5]))
+    ns1 = pcn.relax(torch.FloatTensor([-0.3, 0.2]), torch.FloatTensor([0.4, -0.2, 0.5]))
 
     # copy the neural activations over to CPCN
     for i in range(len(dims)):
-        cpcn.z[i] = pcn.z[i].clone().detach()
+        cpcn.z[i] = ns1.z[i].clone().detach()
 
     # now calculate and compare loss
-    pcn_loss = pcn.loss().item()
+    pcn_loss = pcn.loss(ns1.z).item()
     cpcn_loss = cpcn.pc_loss().item()
 
     assert pcn_loss == pytest.approx(cpcn_loss)
@@ -1185,14 +1185,14 @@ def test_from_pcn_with_match_weights():
     cpcn = LinearBioPCN.from_pcn(pcn, match_weights=True)
 
     # pass some data through the network to set the neural activities
-    pcn.relax(torch.FloatTensor([-0.3, 0.2]), torch.FloatTensor([0.4, -0.2, 0.5]))
+    ns1 = pcn.relax(torch.FloatTensor([-0.3, 0.2]), torch.FloatTensor([0.4, -0.2, 0.5]))
 
     # copy the neural activations over to CPCN
     for i in range(len(dims)):
-        cpcn.z[i] = pcn.z[i].clone().detach()
+        cpcn.z[i] = ns1.z[i].clone().detach()
 
     # now calculate and compare loss
-    pcn_loss = pcn.loss().item()
+    pcn_loss = pcn.loss(ns1.z).item()
     cpcn_loss = cpcn.pc_loss().item()
 
     assert pcn_loss == pytest.approx(cpcn_loss)
@@ -1274,14 +1274,14 @@ def test_from_pcn_copies_over_biases_when_match_weights_is_true():
     cpcn = LinearBioPCN.from_pcn(pcn, match_weights=True)
 
     # pass some data through the network to set the neural activities
-    pcn.relax(torch.FloatTensor([-0.3, 0.2]), torch.FloatTensor([0.4, -0.2, 0.5]))
+    ns1 = pcn.relax(torch.FloatTensor([-0.3, 0.2]), torch.FloatTensor([0.4, -0.2, 0.5]))
 
     # copy the neural activations over to CPCN
     for i in range(len(dims)):
-        cpcn.z[i] = pcn.z[i].clone().detach()
+        cpcn.z[i] = ns1.z[i].clone().detach()
 
     # now calculate and compare loss
-    pcn_loss = pcn.loss().item()
+    pcn_loss = pcn.loss(ns1.z).item()
     cpcn_loss = cpcn.pc_loss().item()
 
     assert pcn_loss == pytest.approx(cpcn_loss)

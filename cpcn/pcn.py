@@ -95,38 +95,29 @@ class PCNetwork(object):
                 nn.init.xavier_uniform_(Q)
                 Q.requires_grad = True
 
-        self.z = [torch.zeros(dim) for dim in self.dims]
-
-    def forward(self, x: torch.Tensor, inplace: bool = True) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Do a forward pass with unconstrained output.
 
-        This sets each layer's variables to the most likely values given the previous
-        layer values. This ends up being the same as a vanilla artificial neural net.
+        This returns the layer activations in a setting where they are fully determined
+        by the previous layer values, which is the minimal-loss solution if only the
+        input layer is fixed.
 
         :param x: input sample
-        :param inplace: whether to update the latent-state values in-place; if false,
-            the values are returned instead of the last-layer activation
-        :returns: list of layer activations after the forward pass; if `inplace` is
-            true (the default), this is the same as `self.z`; if `inplace` is false, the
-            returned activations will be the same as if `inplace` were true, but
-            `self.z` will be untouched
+        :returns: list of layer activations after the forward pass
         """
-        if inplace:
-            z = self.z
-        else:
-            z = [None for _ in self.z]
-
-        z[0] = x
+        z = []
+        z.append(x.detach())
         activation = self._get_activation_fcts()
-        for i in range(len(self.dims) - 1):
-            x = activation[i](x)
+        with torch.no_grad():
+            for i in range(len(self.dims) - 1):
+                x = activation[i](x)
 
-            if self.bias:
-                x = x @ self.W[i].T + self.h[i]
-            else:
-                x = x @ self.W[i].T
+                if self.bias:
+                    x = x @ self.W[i].T + self.h[i]
+                else:
+                    x = x @ self.W[i].T
 
-            z[i + 1] = x
+                z.append(x)
 
         return z
 
@@ -147,67 +138,68 @@ class PCNetwork(object):
         :param y: output sample
         :param pc_loss_profile: if true, the evolution of the predictive-coding loss
             during the optimization is returned in the output namespace, under the name
-            `pc_loss`
+            `profile.pc_loss`
         :param latent_profile: if true, the evolution of the latent variables during the
-            optimization is returned in the output namespace, under the name `latent.z`;
-            the values are stored after each optimizer step, and they are stored as a
-            list of tensors, one for each layer, of shape `[n_it, batch_size, n_units]`;
-            note that this output will always have a batch index, even if the input and
+            optimization is returned in the output namespace, under `profile.z`; the
+            values are stored after each optimizer step, and they are stored as a list
+            of tensors, one for each layer, of shape `[n_it, batch_size, n_units]`; note
+            that this output will always have a batch index, even if the input and
             output samples do not
-        :return: namespace with results; this is empty if both `loss_profile` and
-            `latent_profile` are false
+        :return: namespace with results; this always contains the final layer
+            activations, in a list called `z`; it also contains a `profile` member,
+            which is either empty or populated as described above when discussing the
+            `..._profile` arguments; unlike the `latent_profile` described above, the
+            final `z` values obey the batch conventions from `x` and `y`: i.e., they
+            only have a batch index if `x` and `y` do
         """
         assert x.ndim == y.ndim
         if x.ndim > 1:
             assert x.shape[0] == y.shape[0]
 
         # start with a simple forward pass to initialize the layer values
-        with torch.no_grad():
-            self.forward(x)
+        z = self.forward(x)
 
         # fix the output layer values
-        self.z[-1] = y
-
-        # ensure the variables in the hidden layers require grad
-        for x in self.z[1:-1]:
-            x.requires_grad = True
+        z[-1] = y.detach()
 
         # create an optimizer for the fast parameters
-        fast_optimizer = self.fast_optimizer(self.fast_parameters(), lr=self.z_lr)
+        fast_optimizer = self.fast_optimizer(z[1:-1], lr=self.z_lr)
 
+        # create storage for output
         if latent_profile:
             batch_size = x.shape[0] if x.ndim > 1 else 1
             latent = [torch.zeros((self.z_it, batch_size, dim)) for dim in self.dims]
-
-        # iterate until convergence
         if pc_loss_profile:
             losses = torch.zeros(self.z_it)
+
+        # iterate
         for i in range(self.z_it):
-            self.calculate_z_grad()
+            self.calculate_z_grad(z)
 
             if pc_loss_profile:
                 with torch.no_grad():
-                    losses[i] = self.pc_loss().item()
+                    losses[i] = self.pc_loss(z).item()
 
             fast_optimizer.step()
 
             if latent_profile:
-                for k, crt_z in enumerate(self.z):
+                for k, crt_z in enumerate(z):
                     latent[k][i, :, :] = crt_z
 
-        ns = SimpleNamespace()
+        ns = SimpleNamespace(z=z, profile=SimpleNamespace())
         if pc_loss_profile:
-            ns.pc_loss = losses
+            ns.profile.pc_loss = losses
         if latent_profile:
-            ns.latent = SimpleNamespace(z=latent)
+            ns.profile.z = latent
 
         return ns
 
     def loss(
-        self, reduction: str = "mean", ignore_constraint: bool = False
+        self, z: Sequence, reduction: str = "mean", ignore_constraint: bool = False
     ) -> torch.Tensor:
-        """Calculate the loss given the current values of the random variables.
+        """Calculate the loss given the current values of the latent variables.
         
+        :param z: list of latent activations, one tensor per layer
         :param reduction: reduction to apply to the output: `"none" | "mean" | "sum"`
         :param ignore_constraint: if true, the constraint term is not included even if
             `self.constrained` is true; it does nothing if `self.constrained` is false;
@@ -215,7 +207,7 @@ class PCNetwork(object):
             satisfied, so this parameter should not make a significant difference after
             training has converged
         """
-        x = self.z[0]
+        x = z[0]
 
         batch_size = 1 if x.ndim == 1 else len(x)
         loss = torch.zeros(batch_size).to(x.device)
@@ -237,7 +229,7 @@ class PCNetwork(object):
             else:
                 x_pred = x_pred @ self.W[i].T
 
-            x = self.z[i + 1]
+            x = z[i + 1]
             loss += ((x - x_pred) ** 2).sum(dim=-1) / self.variances[i]
 
         if reduction == "sum":
@@ -250,13 +242,13 @@ class PCNetwork(object):
         loss *= 0.5
         return loss
 
-    def pc_loss(self) -> torch.Tensor:
+    def pc_loss(self, z: Sequence) -> torch.Tensor:
         """An alias of `self.loss()` with `ignore_constraint` set to true. This is
         mostly useful for consistency with CPCN classes.
         """
-        return self.loss(ignore_constraint=True)
+        return self.loss(z, ignore_constraint=True)
 
-    def calculate_z_grad(self):
+    def calculate_z_grad(self, z: Sequence):
         """Calculate gradients for fast (z) variables.
         
         These gradients follow from backprop on `self.loss()`, but this manual
@@ -274,30 +266,32 @@ class PCNetwork(object):
                 for i in range(len(self.dims) - 1):
                     f = activation[i]
 
-                    z = self.z[i].detach().requires_grad_()
-                    crt_fz = f(z)
+                    crt_z = z[i].detach().requires_grad_()
+                    crt_fz = f(crt_z)
                     crt_fz_der = torch.autograd.grad(
-                        crt_fz, z, grad_outputs=torch.ones_like(z), create_graph=True
+                        crt_fz,
+                        crt_z,
+                        grad_outputs=torch.ones_like(crt_z),
+                        create_graph=True,
                     )[0]
 
                     fz.append(crt_fz.detach())
                     fz_der.append(crt_fz_der.detach())
         else:
-            with torch.no_grad():
-                for i in range(len(self.dims) - 1):
-                    z = self.z[i].detach().requires_grad_()
-                    fz.append(activation[i](z))
-                    fz_der.append(der_activation[i](z))
+            for i in range(len(self.dims) - 1):
+                crt_z = z[i].detach()
+                fz.append(activation[i](crt_z))
+                fz_der.append(der_activation[i](crt_z))
 
+        # calculate error nodes
         with torch.no_grad():
-            # calculate error nodes
             eps = []
             for i in range(1, len(self.dims)):
                 mu = fz[i - 1] @ self.W[i - 1].T
                 if self.bias:
                     mu += self.h[i - 1]
 
-                eps.append((self.z[i] - mu) / self.variances[i - 1])
+                eps.append((z[i].detach() - mu) / self.variances[i - 1])
 
             # calculate the gradients
             for i in range(1, len(self.dims) - 1):
@@ -306,11 +300,11 @@ class PCNetwork(object):
                     v = self.variances[i - 1]
                     grad0 += fz_der[i] * (fz[i] @ self.Q[i - 1].T @ self.Q[i - 1]) / v
 
-                if grad0.ndim == self.z[i].ndim + 1:
+                if grad0.ndim == z[i].ndim + 1:
                     grad0 = grad0.mean(dim=0)
-                self.z[i].grad = grad0
+                z[i].grad = grad0
 
-    def calculate_weight_grad(self, reduction: str = "mean"):
+    def calculate_weight_grad(self, z: Sequence, reduction: str = "mean"):
         """Calculate gradients for slow (weight) variables.
 
         This is equivalent to using `backward()` on the output from `self.loss()`
@@ -319,12 +313,13 @@ class PCNetwork(object):
         optimization needs to maximize over `Q` while minimizing over all the other
         paramters.
 
+        :param z: values of latent variables in each layer
         :param reduction: reduction to apply to the gradients: `"mean" | "sum"`
         """
         for param in self.slow_parameters():
             param.grad = None
 
-        loss = self.loss(reduction=reduction)
+        loss = self.loss(z, reduction=reduction)
         loss.backward()
 
         # need to flip the sign of the Lagrange multipliers, if any
@@ -344,16 +339,13 @@ class PCNetwork(object):
         """Moves and/or casts the parameters and buffers."""
         with torch.no_grad():
             for i in range(len(self.W)):
-                self.W[i] = self.W[i].to(*args, **kwargs).requires_grad_()
+                self.W[i] = self.W[i].to(*args, **kwargs).detach().requires_grad_()
                 if self.bias:
-                    self.h[i] = self.h[i].to(*args, **kwargs).requires_grad_()
-
-            for i in range(len(self.z)):
-                self.z[i] = self.z[i].to(*args, **kwargs)
+                    self.h[i] = self.h[i].to(*args, **kwargs).detach().requires_grad_()
 
             if self.constrained:
                 for i in range(len(self.Q)):
-                    self.Q[i] = self.Q[i].to(*args, **kwargs).requires_grad_()
+                    self.Q[i] = self.Q[i].to(*args, **kwargs).detach().requires_grad_()
 
         return self
 
@@ -388,13 +380,6 @@ class PCNetwork(object):
             groups.append({"name": "h", "params": self.h})
 
         return groups
-
-    def fast_parameters(self) -> list:
-        """Create list of parameters to optimize in the fast phase.
-
-        These are the random variables in all but the input and output layers.
-        """
-        return self.z[1:-1]
 
     @staticmethod
     def _extend(var: Sequence, n: int) -> np.ndarray:
