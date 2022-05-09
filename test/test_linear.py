@@ -531,12 +531,12 @@ def test_bias_grad_on_batch(net):
         assert torch.allclose(old, new / len(x))
 
 
-def test_weights_change_when_optimizing_slow_parameters(net):
+def test_weights_change_when_optimizing_parameters(net):
     x0 = torch.FloatTensor([-0.3, -0.2, 0.6])
     y0 = torch.FloatTensor([0.9, 0.3])
     old_Ws = [_.clone().detach() for _ in net.W_a + net.W_b + net.Q + net.M]
 
-    optimizer = torch.optim.Adam(net.slow_parameters(), lr=1.0)
+    optimizer = torch.optim.Adam(net.parameters(), lr=1.0)
     ns = net.relax(x0, y0)
     net.calculate_weight_grad(ns)
     optimizer.step()
@@ -546,12 +546,12 @@ def test_weights_change_when_optimizing_slow_parameters(net):
         assert not torch.any(torch.isclose(old_W, new_W))
 
 
-def test_biases_change_when_optimizing_slow_parameters(net):
+def test_biases_change_when_optimizing_parameters(net):
     x0 = torch.FloatTensor([-0.3, -0.2, 0.6])
     y0 = torch.FloatTensor([0.9, 0.3])
     old_hs = [_.clone().detach() for _ in net.h_a + net.h_b]
 
-    optimizer = torch.optim.Adam(net.slow_parameters(), lr=1.0)
+    optimizer = torch.optim.Adam(net.parameters(), lr=1.0)
     ns = net.relax(x0, y0)
     net.calculate_weight_grad(ns)
     optimizer.step()
@@ -564,7 +564,7 @@ def test_biases_change_when_optimizing_slow_parameters(net):
 def test_no_nan_or_inf_after_a_few_learning_steps(net):
     torch.manual_seed(0)
 
-    optimizer = torch.optim.Adam(net.slow_parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
     for i in range(4):
         x = torch.Tensor(3).uniform_()
         y = torch.Tensor(2).uniform_()
@@ -685,7 +685,7 @@ def test_weight_gradients_match_autograd_from_loss(net, var):
 
     manual_grads = [_.grad.clone().detach() for _ in getattr(net, var)]
 
-    for param in net.slow_parameters():
+    for param in net.parameters():
         param.requires_grad_()
         if param.grad is not None:
             param.grad.detach_()
@@ -881,7 +881,7 @@ def test_weight_gradients_match_autograd_from_loss_batch(net, data, var, red):
 
     manual_grads = [_.grad.clone().detach() for _ in getattr(net, var)]
 
-    for param in net.slow_parameters():
+    for param in net.parameters():
         param.requires_grad_()
         if param.grad is not None:
             param.grad.detach_()
@@ -956,7 +956,7 @@ def test_q_gradient_with_nontrivial_constraint_vs_autograd(net_nontrivial_constr
 
     manual_grads = [_.grad.clone().detach() for _ in net.Q]
 
-    for param in net.slow_parameters():
+    for param in net.parameters():
         param.requires_grad_()
         if param.grad is not None:
             param.grad.detach_()
@@ -995,7 +995,7 @@ def test_wa_gradient_with_nontrivial_constraint_vs_autograd(net_nontrivial_const
 
     manual_grads = [_.grad.clone().detach() for _ in net.W_a]
 
-    for param in net.slow_parameters():
+    for param in net.parameters():
         param.requires_grad_()
         if param.grad is not None:
             param.grad.detach_()
@@ -1074,21 +1074,21 @@ def test_initial_param_scale_xavier(var):
     assert sigma == pytest.approx(expected, rel=tol)
 
 
-def test_slow_parameter_groups_is_iterable_of_dicts_each_with_params_member(net):
-    param_groups = net.slow_parameter_groups()
+def test_parameter_groups_is_iterable_of_dicts_each_with_params_member(net):
+    param_groups = net.parameter_groups()
     for d in param_groups:
         assert "params" in d
 
 
-def test_slow_parameter_groups_returns_dicts_with_name_key(net):
-    param_groups = net.slow_parameter_groups()
+def test_parameter_groups_returns_dicts_with_name_key(net):
+    param_groups = net.parameter_groups()
     for d in param_groups:
         assert "name" in d
 
 
-def test_slow_parameter_groups_lists_the_same_parameters_as_slow_parameters(net):
-    params1 = set(net.slow_parameters())
-    params2 = set(sum([_["params"] for _ in net.slow_parameter_groups()], []))
+def test_parameter_groups_lists_the_same_parameters_as_parameters(net):
+    params1 = set(net.parameters())
+    params2 = set(sum([_["params"] for _ in net.parameter_groups()], []))
 
     for x in params1:
         assert x in params2, "element of params missing from param_groups"
@@ -1097,23 +1097,23 @@ def test_slow_parameter_groups_lists_the_same_parameters_as_slow_parameters(net)
 
 
 @pytest.mark.parametrize("var", ["W_a", "W_b", "Q", "M", "h_a", "h_b"])
-def test_slow_parameter_groups_contains_expected_names(net, var):
-    params = net.slow_parameter_groups()
+def test_parameter_groups_contains_expected_names(net, var):
+    params = net.parameter_groups()
     names = [_["name"] for _ in params]
 
     assert var in names
 
 
-def test_slow_parameters_no_bias_a(net_no_bias_a):
-    params = net_no_bias_a.slow_parameter_groups()
+def test_parameters_no_bias_a(net_no_bias_a):
+    params = net_no_bias_a.parameter_groups()
     names = [_["name"] for _ in params]
 
     assert "h_a" not in names
     assert "h_b" in names
 
 
-def test_slow_parameters_no_bias_b(net_no_bias_b):
-    params = net_no_bias_b.slow_parameter_groups()
+def test_parameters_no_bias_b(net_no_bias_b):
+    params = net_no_bias_b.parameter_groups()
     names = [_["name"] for _ in params]
 
     assert "h_b" not in names

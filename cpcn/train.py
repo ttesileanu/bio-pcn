@@ -193,11 +193,11 @@ class Trainer:
         """Set up optimizers for the main network and for the classifier, if any."""
         if len(self.lr_factors) == 0:
             optimizer = self.optimizer_class(
-                self.net.slow_parameters(), **self.optimizer_kwargs
+                self.net.parameters(), **self.optimizer_kwargs
             )
         else:
             # use per-group learning rate scaling factors
-            param_groups = self.net.slow_parameter_groups()
+            param_groups = self.net.parameter_groups()
 
             # slightly annoying bit: if default learning rate is used, we can't read it
             # from `self.optimizer_kwargs`; so we first create an optimizer with all
@@ -347,7 +347,7 @@ class Trainer:
         }
 
         # add CUDA memory usage, if CUDA is being used
-        param = self.net.slow_parameters()[0]
+        param = self.net.parameters()[0]
         if param.is_cuda:
             memory = torch.cuda.memory_allocated(param.device)
             progress_info["cuda_mem"] = pretty_size(memory)
@@ -396,7 +396,7 @@ class Trainer:
         :param classifier: the classifier to use
         :param classifier_dim: which layer of `net` to pass into the classifier
         :param device: device to send the classifier to; default: the device to which
-            the first output of `net.slow_parameters()` is assigned
+            the first output of `net.parameters()` is assigned
         """
         self.classifier = classifier
         if isinstance(self.classifier, str):
@@ -436,7 +436,7 @@ class Trainer:
             self.classifier_dim = classifier_dim
 
         if device is None:
-            device = self.net.slow_parameters()[0].device
+            device = self.net.parameters()[0].device
         self.classifier = self.classifier.to(device)
 
         return self
@@ -519,7 +519,7 @@ class Trainer:
         """Set a scaling factor for the learning rate of a particular parameter group.
         
         :param params: name of a single set of parameters, or iterable of such names;
-            this must match the names returned from `net.slow_parameter_groups()`
+            this must match the names returned from `net.parameter_groups()`
         :param factor: learning-rate factor
         """
         if isinstance(params, str):
@@ -869,7 +869,7 @@ class Trainer:
         """
         if type == "sample":
             # need a trick to find out the number of layers for the fast variables
-            device = self.net.slow_parameters()[0].device
+            device = self.net.parameters()[0].device
             test_in = torch.zeros(self.net.dims[0], device=device)
             test_out = torch.zeros(self.net.dims[-1], device=device)
             test_object = self.net.relax(test_in, test_out)

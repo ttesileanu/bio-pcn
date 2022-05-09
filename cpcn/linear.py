@@ -423,7 +423,7 @@ class LinearBioPCN:
         loss /= 2
         return loss
 
-    def slow_parameters(self) -> list:
+    def parameters(self) -> list:
         """Create list of parameters to optimize in the slow phase.
 
         These are the weights and biases.
@@ -436,7 +436,7 @@ class LinearBioPCN:
 
         return res
 
-    def slow_parameter_groups(self) -> list:
+    def parameter_groups(self) -> list:
         """Create list of parameter groups to optimize in the slow phase.
         
         This is meant to allow for different learning rates for different parameters.

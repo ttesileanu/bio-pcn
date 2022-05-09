@@ -78,13 +78,13 @@ def test_forward_result_is_stationary_point_of_relax(net):
         assert torch.allclose(old, new)
 
 
-def test_weights_and_biases_change_when_optimizing_slow_parameters(net):
+def test_weights_and_biases_change_when_optimizing_parameters(net):
     x0 = torch.FloatTensor([-0.3, -0.2, 0.6])
     y0 = torch.FloatTensor([0.9, 0.3])
     old_Ws = [_.clone().detach() for _ in net.W]
     old_bs = [_.clone().detach() for _ in net.h]
 
-    optimizer = torch.optim.Adam(net.slow_parameters(), lr=1.0)
+    optimizer = torch.optim.Adam(net.parameters(), lr=1.0)
     ns = net.relax(x0, y0)
 
     optimizer.zero_grad()
@@ -141,7 +141,7 @@ def test_loss_does_not_change_weights_and_biases(net):
 def test_no_nan_or_inf_after_a_few_learning_steps(net):
     torch.manual_seed(0)
 
-    optimizer = torch.optim.Adam(net.slow_parameters())
+    optimizer = torch.optim.Adam(net.parameters())
     for i in range(4):
         x = torch.Tensor(3).uniform_()
         y = torch.Tensor(2).uniform_()
@@ -234,7 +234,7 @@ def test_weights_reproducible_for_same_seed_after_learning():
     # do some learning
     torch.manual_seed(seed)
     net = PCNetwork(dims)
-    optimizer = torch.optim.Adam(net.slow_parameters())
+    optimizer = torch.optim.Adam(net.parameters())
     for crt_x, crt_y in zip(x, y):
         ns = net.relax(crt_x, crt_y)
 
@@ -247,7 +247,7 @@ def test_weights_reproducible_for_same_seed_after_learning():
     # reset and do the learning again
     torch.manual_seed(seed)
     net = PCNetwork(dims)
-    optimizer = torch.optim.Adam(net.slow_parameters())
+    optimizer = torch.optim.Adam(net.parameters())
     for crt_x, crt_y in zip(x, y):
         ns = net.relax(crt_x, crt_y)
 
@@ -271,7 +271,7 @@ def test_learning_effects_are_different_for_subsequent_runs():
     # do some learning
     torch.manual_seed(seed)
     net = PCNetwork(dims)
-    optimizer = torch.optim.Adam(net.slow_parameters())
+    optimizer = torch.optim.Adam(net.parameters())
     for crt_x, crt_y in zip(x, y):
         ns = net.relax(crt_x, crt_y)
 
@@ -283,7 +283,7 @@ def test_learning_effects_are_different_for_subsequent_runs():
 
     # reset and do the learning again -- without resetting random seed this time!
     net = PCNetwork(dims)
-    optimizer = torch.optim.Adam(net.slow_parameters())
+    optimizer = torch.optim.Adam(net.parameters())
     for crt_x, crt_y in zip(x, y):
         ns = net.relax(crt_x, crt_y)
 
@@ -310,7 +310,7 @@ def test_training_with_batches_of_size_one():
     torch.manual_seed(seed)
     net = PCNetwork(dims, variances=variances)
 
-    optimizer = torch.optim.SGD(net.slow_parameters(), lr=lr)
+    optimizer = torch.optim.SGD(net.parameters(), lr=lr)
     for crt_x, crt_y in zip(x, y):
         ns = net.relax(crt_x, crt_y)
 
@@ -325,7 +325,7 @@ def test_training_with_batches_of_size_one():
     torch.manual_seed(seed)
     net = PCNetwork(dims, variances=variances)
 
-    optimizer = torch.optim.SGD(net.slow_parameters(), lr=lr)
+    optimizer = torch.optim.SGD(net.parameters(), lr=lr)
     for crt_x, crt_y in zip(x, y):
         crt_x_batch = crt_x[None, :]
         crt_y_batch = crt_y[None, :]
@@ -362,7 +362,7 @@ def test_training_with_batches_of_nontrivial_size():
 
     # gradients are averaged over batch samples by default, *almost* equivalent to lower
     # lr when training sample by sample
-    optimizer = torch.optim.SGD(net.slow_parameters(), lr=lr / n_samples)
+    optimizer = torch.optim.SGD(net.parameters(), lr=lr / n_samples)
     for crt_x, crt_y in zip(x, y):
         ns = net.relax(crt_x, crt_y)
 
@@ -377,7 +377,7 @@ def test_training_with_batches_of_nontrivial_size():
     torch.manual_seed(seed)
     net = PCNetwork(dims, **kwargs)
 
-    optimizer = torch.optim.SGD(net.slow_parameters(), lr=lr)
+    optimizer = torch.optim.SGD(net.parameters(), lr=lr)
     for crt_x1, crt_x2, crt_y1, crt_y2 in zip(x[::2], x[1::2], y[::2], y[1::2]):
         crt_x_batch = torch.vstack((crt_x1, crt_x2))
         crt_y_batch = torch.vstack((crt_y1, crt_y2))
@@ -529,16 +529,16 @@ def test_calculate_weight_grad_matches_backward_on_loss(net, red, data):
     ns = net.relax(data.x, data.y)
     net.calculate_weight_grad(ns, reduction=red)
 
-    old_grad = [_.grad.clone().detach() for _ in net.slow_parameters()]
+    old_grad = [_.grad.clone().detach() for _ in net.parameters()]
 
-    for param in net.slow_parameters():
+    for param in net.parameters():
         if param.grad is not None:
             param.grad.zero_()
 
     loss = net.loss(ns.z, reduction=red)
     loss.backward()
 
-    for old, new_param in zip(old_grad, net.slow_parameters()):
+    for old, new_param in zip(old_grad, net.parameters()):
         assert torch.allclose(old, new_param.grad)
 
 
@@ -630,9 +630,9 @@ def test_calculate_weight_grad_matches_backward_on_loss_constraint(
     ns = net.relax(data.x, data.y)
     net.calculate_weight_grad(ns, reduction=red)
 
-    old_grad = [_.grad.clone().detach() for _ in net.slow_parameters()]
+    old_grad = [_.grad.clone().detach() for _ in net.parameters()]
 
-    for param in net.slow_parameters():
+    for param in net.parameters():
         if param.grad is not None:
             param.grad.zero_()
 
@@ -641,7 +641,7 @@ def test_calculate_weight_grad_matches_backward_on_loss_constraint(
     for Q in net.Q:
         Q.grad = -Q.grad
 
-    for old, new_param in zip(old_grad, net.slow_parameters()):
+    for old, new_param in zip(old_grad, net.parameters()):
         assert torch.allclose(old, new_param.grad)
 
 
@@ -744,21 +744,21 @@ def test_z_dynamics_uses_correct_sign_for_constraint(net_constraint):
         assert torch.allclose(expected, grad_z[i - 1])
 
 
-def test_slow_parameter_groups_is_iterable_of_dicts_each_with_params_member(net):
-    param_groups = net.slow_parameter_groups()
+def test_parameter_groups_is_iterable_of_dicts_each_with_params_member(net):
+    param_groups = net.parameter_groups()
     for d in param_groups:
         assert "params" in d
 
 
-def test_slow_parameter_groups_returns_dicts_with_name_key(net):
-    param_groups = net.slow_parameter_groups()
+def test_parameter_groups_returns_dicts_with_name_key(net):
+    param_groups = net.parameter_groups()
     for d in param_groups:
         assert "name" in d
 
 
-def test_slow_parameter_groups_lists_the_same_parameters_as_slow_parameters(net):
-    params1 = set(net.slow_parameters())
-    params2 = set(sum([_["params"] for _ in net.slow_parameter_groups()], []))
+def test_parameter_groups_lists_the_same_parameters_as_parameters(net):
+    params1 = set(net.parameters())
+    params2 = set(sum([_["params"] for _ in net.parameter_groups()], []))
 
     for x in params1:
         assert x in params2, "element of params missing from param_groups"
@@ -767,29 +767,29 @@ def test_slow_parameter_groups_lists_the_same_parameters_as_slow_parameters(net)
 
 
 @pytest.mark.parametrize("var", ["W", "h"])
-def test_slow_parameter_groups_contains_expected_names(net, var):
-    params = net.slow_parameter_groups()
+def test_parameter_groups_contains_expected_names(net, var):
+    params = net.parameter_groups()
     names = [_["name"] for _ in params]
 
     assert var in names
 
 
-def test_slow_parameters_no_bias(net_nb):
-    params = net_nb.slow_parameter_groups()
+def test_parameters_no_bias(net_nb):
+    params = net_nb.parameter_groups()
     names = [_["name"] for _ in params]
 
     assert "b" not in names
 
 
-def test_slow_parameters_constraint(net_constraint):
-    params = net_constraint.slow_parameter_groups()
+def test_parameters_constraint(net_constraint):
+    params = net_constraint.parameter_groups()
     names = [_["name"] for _ in params]
 
     assert "Q" in names
 
 
-def test_slow_parameters_no_constraint(net):
-    params = net.slow_parameter_groups()
+def test_parameters_no_constraint(net):
+    params = net.parameter_groups()
     names = [_["name"] for _ in params]
 
     assert "Q" not in names
