@@ -350,6 +350,28 @@ class PCNetwork(object):
 
         return self
 
+    def clone(self) -> "PCNetwork":
+        new = PCNetwork(
+            self.dims,
+            self.activation,
+            z_it=self.z_it,
+            z_lr=self.z_lr,
+            variances=self.variances,
+            rho=self.rho,
+            constrained=self.constrained,
+            bias=self.bias,
+            fast_optimizer=self.fast_optimizer,
+        )
+
+        for d in self.parameter_groups():
+            name = d["name"]
+            value = d["params"]
+
+            for i in range(len(value)):
+                getattr(new, name)[i] = value[i].detach().clone().requires_grad_()
+
+        return new
+
     def parameters(self) -> list:
         """Create list of parameters to optimize in the slow phase.
 

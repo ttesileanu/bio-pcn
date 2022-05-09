@@ -856,3 +856,47 @@ def test_default_activation_function_is_tanh():
 
     for z1, z2 in zip(ns1.z, ns2.z):
         assert torch.allclose(z1, z2)
+
+
+def test_clone(net_ntv):
+    net = net_ntv
+
+    torch.manual_seed(0)
+    net_clone = net.clone()
+
+    n_steps = 4
+
+    x = torch.Tensor(n_steps, 3).uniform_()
+    y = torch.Tensor(n_steps, 2).uniform_()
+
+    for crt_net in [net, net_clone]:
+        optimizer = torch.optim.Adam(crt_net.parameters())
+        for i in range(4):
+            ns = crt_net.relax(x[i], y[i])
+            crt_net.calculate_weight_grad(ns)
+            optimizer.step()
+
+    for param1, param2 in zip(net.parameters(), net_clone.parameters()):
+        assert torch.allclose(param1, param2)
+
+
+def test_clone_with_constraint(net_constraint):
+    net = net_constraint
+
+    torch.manual_seed(0)
+    net_clone = net.clone()
+
+    n_steps = 4
+
+    x = torch.Tensor(n_steps, 3).uniform_()
+    y = torch.Tensor(n_steps, 2).uniform_()
+
+    for crt_net in [net, net_clone]:
+        optimizer = torch.optim.Adam(crt_net.parameters())
+        for i in range(4):
+            ns = crt_net.relax(x[i], y[i])
+            crt_net.calculate_weight_grad(ns)
+            optimizer.step()
+
+    for param1, param2 in zip(net.parameters(), net_clone.parameters()):
+        assert torch.allclose(param1, param2)
