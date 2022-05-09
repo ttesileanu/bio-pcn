@@ -7,6 +7,8 @@ from collections import OrderedDict
 import torch
 import numpy as np
 
+import datetime
+
 from .util import one_hot_accuracy, hierarchical_get, pretty_size
 
 
@@ -37,7 +39,7 @@ class Trainer:
     :param history: namespace of history data for the last call to `run()`; see the
         `peek...` functions
     :param checkpoints: dictionary of model checkpoints, containing fields "batch",
-        "epoch", and "model"
+        "epoch", "time", and "model"
     :param schedulers: list of tuples `(scheduler, condition)` of learning-rate
         scheduler constructors and the conditions under which they should be called
     :param lr_factors: dictionary of learning-rate scaling factors
@@ -608,7 +610,9 @@ class Trainer:
         """Add monitoring for the full model.
 
         This stores a clone of the model every time the condition is satified. The
-        storage is in the `self.checkpoint` dictionary.
+        storage is in the `self.checkpoint` dictionary, under `"model"`. The dictionary
+        also contains `"epoch"`, `"batch"`, and `"time"`. The latter is the time when
+        the object was stored, in `isoformat`.
         
         :param condition: condition to be fulfilled for values to be stored; see
             `add_observer`
@@ -872,6 +876,9 @@ class Trainer:
         target_dict["epoch"].append(ns.epoch)
         target_dict["batch"].append(ns.batch)
 
+        now = datetime.datetime.now().isoformat()
+        target_dict["time"].append(now)
+
         clone = ns.net.clone().to("cpu")
         target_dict["model"].append(clone)
 
@@ -1022,7 +1029,7 @@ class Trainer:
             for var in history:
                 history[var] = []
 
-        self.checkpoint = {"epoch": [], "batch": [], "model": []}
+        self.checkpoint = {"epoch": [], "batch": [], "model": [], "time": []}
 
     def _coalesce_history(self):
         """Coalesce history into tensor form. Also turn checkpoint epoch and batch into
