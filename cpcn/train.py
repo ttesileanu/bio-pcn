@@ -30,7 +30,8 @@ class Trainer:
     :param classifier_criterion: objective fucntion for training classifier; default:
         `MSELoss()`
     :param classifier_dim: which layer of `net` to pass into the classifier
-    :param observers: list of tuples `(observer, condition)`; see `add_observer()`
+    :param observers: list of tuples `(observer, condition, profile_needed)`; see
+        `add_observer()`
     :param validation_condition: callable identifying batches where a validation run is
         performed
     :param history: namespace of history data for the last call to `run()`; see the
@@ -163,7 +164,9 @@ class Trainer:
                 accuracy = self.accuracy_fct(y_pred, y)
 
                 # call any batch observers; this also stores training-mode diagnostics
-                self._report(observers, epoch, batch, pc_loss, accuracy, batch_results)
+                terminate = self._report(
+                    observers, epoch, batch, pc_loss, accuracy, batch_results
+                )
                 if self.validation_condition(batch):
                     # this fills out the `validation` and `train` fields of history
                     self._validation_run(epoch, batch)
@@ -178,6 +181,9 @@ class Trainer:
                     pbar.update()
                     progress_info = self._pbar_report(epoch, batch)
                     pbar.set_postfix(progress_info, refresh=False)
+
+            if terminate:
+                break
 
             batch += 1
 
@@ -266,6 +272,7 @@ class Trainer:
         """Send per-batch information to a list of observers, and store training-mode
         diagnostics in `self.history`.
         """
+        terminate = False
         if len(observers) > 0:
             batch_ns = SimpleNamespace(
                 epoch=epoch,
@@ -278,7 +285,7 @@ class Trainer:
                 train_accuracy=accuracy,
             )
             for observer in observers:
-                observer(batch_ns)
+                terminate = terminate or observer(batch_ns)
 
         # keep track of loss and accuracy
         target_dict = self.history.all_train
@@ -288,6 +295,8 @@ class Trainer:
         target_dict["accuracy"].append(torch.FloatTensor([accuracy]))
         lr = self._optimizer.param_groups[0]["lr"]
         target_dict["lr"].append(torch.FloatTensor([lr]))
+
+        return terminate
 
     def _validation_run(self, epoch: int, batch: int):
         # evaluate performance on validation set
@@ -475,7 +484,7 @@ class Trainer:
         
         An observer is a function called after every training batch that satisfies a
         certain condition. The observer gets called with a namespace argument,
-            observer(ns: SimpleNamespace)
+            observer(ns: SimpleNamespace) -> bool
         where the `SimpleNamespace` contains
             batch:          the index of the batch that was just processed
             epoch:          an epoch index
@@ -485,6 +494,7 @@ class Trainer:
             classifier:     network used for classifier output (if any)
             train_loss:     (predictive-coding) loss on training set
             train_accuracy: accuracy on training set
+        If the observer returns true, the run is terminated prematurely.
 
             (if `profile == True`)
             pc_loss_profile:the loss profile from `net.relax()`
@@ -608,7 +618,7 @@ class Trainer:
         """
         # replace old model monitors
         idx = None
-        for i, (observer, _) in enumerate(self.observers):
+        for i, (observer, _, _) in enumerate(self.observers):
             if observer == self._model_monitor:
                 idx = i
         if idx is not None:
