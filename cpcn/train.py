@@ -35,6 +35,8 @@ class Trainer:
         performed
     :param history: namespace of history data for the last call to `run()`; see the
         `peek...` functions
+    :param checkpoints: dictionary of model checkpoints, containing fields "batch",
+        "epoch", and "model"
     :param schedulers: list of tuples `(scheduler, condition)` of learning-rate
         scheduler constructors and the conditions under which they should be called
     :param lr_factors: dictionary of learning-rate scaling factors
@@ -563,7 +565,7 @@ class Trainer:
         """Add per-batch monitoring.
         
         This is used to store values of parameters after each batch that obeys a
-        condition). The values will be stored in `self.history` during calls to
+        condition. The values will be stored in `self.history` during calls to
         `self.run()`.
 
         :param name: the name to be used in `self.history` for the stored values
@@ -580,6 +582,40 @@ class Trainer:
         self._setup_history(name, vars, "batch")
         return self.add_observer(
             lambda ns, name=name: self._monitor(name, ns),
+            condition=condition,
+            every=every,
+            count=count,
+            mask=mask,
+        )
+
+    def peek_model(
+        self,
+        condition: Optional[Callable] = None,
+        every: Optional[int] = None,
+        count: Optional[int] = None,
+        mask: Optional[Sequence] = None,
+    ) -> "Trainer":
+        """Add monitoring for the full model.
+
+        This stores a clone of the model every time the condition is satified. The
+        storage is in the `self.checkpoint` dictionary.
+        
+        :param condition: condition to be fulfilled for values to be stored; see
+            `add_observer`
+        :param every: store every `every` batches; see `add_observer`
+        :param count: store `count` times during a run; see `add_observer`
+        :param mask: store whenever `mask[batch]` is true; see `add_observer`
+        """
+        # replace old model monitors
+        idx = None
+        for i, (observer, _) in enumerate(self.observers):
+            if observer == self._model_monitor:
+                idx = i
+        if idx is not None:
+            self.observers.pop(idx)
+
+        return self.add_observer(
+            self._model_monitor,
             condition=condition,
             every=every,
             count=count,
@@ -777,6 +813,15 @@ class Trainer:
             # send to CPU so this does not take up GPU memory!
             target.append(value.detach().to("cpu").clone().unsqueeze(0))
 
+    def _model_monitor(self, ns: SimpleNamespace):
+        """Observer called to store a model checkpoint."""
+        target_dict = self.checkpoint
+        target_dict["epoch"].append(ns.epoch)
+        target_dict["batch"].append(ns.batch)
+
+        clone = ns.net.clone().to("cpu")
+        target_dict["model"].append(clone)
+
     def _sample_monitor(self, name: str, ns: SimpleNamespace, sel: Optional[Sequence]):
         """Observer called to update per-sample monitors."""
         target_dict = getattr(self.history, name)
@@ -910,14 +955,18 @@ class Trainer:
         setattr(self.history, name, storage)
 
     def _reset_history(self):
-        """Reset history storage (used before a `run()`)."""
+        """Reset history and checkpoint storage(used before a `run()`)."""
         for name in self.history.__dict__:
             history = getattr(self.history, name)
             for var in history:
                 history[var] = []
 
+        self.checkpoint = {"epoch": [], "batch": [], "model": []}
+
     def _coalesce_history(self):
-        """Coalesce history into tensor form."""
+        """Coalesce history into tensor form. Also turn checkpoint epoch and batch into
+        tensors.
+        """
         for name in self.history.__dict__:
             history = getattr(self.history, name)
             for var in history:
@@ -929,6 +978,9 @@ class Trainer:
                 history["batch"] = torch.IntTensor(history["batch"])
             if "sample" in history:
                 history["sample"] = torch.IntTensor(history["sample"])
+
+        self.checkpoint["epoch"] = torch.IntTensor(self.checkpoint["epoch"])
+        self.checkpoint["batch"] = torch.IntTensor(self.checkpoint["batch"])
 
 
 def evaluate(
