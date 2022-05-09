@@ -767,6 +767,47 @@ class Trainer:
         self.schedulers.append((scheduler, condition))
         return self
 
+    def add_nan_guard(
+        self,
+        condition: Optional[Callable] = None,
+        every: Optional[int] = None,
+        count: Optional[int] = None,
+        mask: Optional[Sequence] = None,
+    ):
+        """Add an observer that stops the run if any parameters reach infinite or NaN
+        values.
+        
+        :param condition: condition to be fulfilled for values to be stored; see
+            `add_observer`
+        :param every: store every `every` batches; see `add_observer`
+        :param count: store `count` times during a run; see `add_observer`
+        :param mask: store whenever `mask[batch]` is true; see `add_observer`
+        """
+        # replace old model monitors
+        idx = None
+        for i, (observer, _, _) in enumerate(self.observers):
+            if observer == self._nan_guard:
+                idx = i
+        if idx is not None:
+            self.observers.pop(idx)
+
+        return self.add_observer(
+            self._nan_guard, condition=condition, every=every, count=count, mask=mask,
+        )
+
+    def _nan_guard(self, ns: SimpleNamespace) -> bool:
+        terminate = False
+        for param in ns.net.parameters():
+            if torch.is_tensor(param):
+                terminate = terminate or not torch.all(torch.isfinite(param))
+            else:
+                for layer_param in param:
+                    terminate = terminate or not torch.all(torch.isfinite(layer_param))
+
+        terminate = terminate or not np.isfinite(ns.train_loss)
+
+        return terminate
+
     def _get_condition_fct(
         self,
         condition: Optional[Callable],
@@ -800,7 +841,7 @@ class Trainer:
             mod = (batch * (count - 1)) % (n_batches - 1)
             return mod == 0 or mod > n_batches - count
 
-    def _monitor(self, name: str, ns: SimpleNamespace):
+    def _monitor(self, name: str, ns: SimpleNamespace) -> bool:
         """Observer called to update per-epoch or per-batch monitors."""
         target_dict = getattr(self.history, name)
         target_dict["epoch"].append(ns.epoch)
@@ -823,7 +864,9 @@ class Trainer:
             # send to CPU so this does not take up GPU memory!
             target.append(value.detach().to("cpu").clone().unsqueeze(0))
 
-    def _model_monitor(self, ns: SimpleNamespace):
+        return False
+
+    def _model_monitor(self, ns: SimpleNamespace) -> bool:
         """Observer called to store a model checkpoint."""
         target_dict = self.checkpoint
         target_dict["epoch"].append(ns.epoch)
@@ -832,7 +875,11 @@ class Trainer:
         clone = ns.net.clone().to("cpu")
         target_dict["model"].append(clone)
 
-    def _sample_monitor(self, name: str, ns: SimpleNamespace, sel: Optional[Sequence]):
+        return False
+
+    def _sample_monitor(
+        self, name: str, ns: SimpleNamespace, sel: Optional[Sequence]
+    ) -> bool:
         """Observer called to update per-sample monitors."""
         target_dict = getattr(self.history, name)
 
@@ -872,9 +919,11 @@ class Trainer:
         target_dict["epoch"].extend(count * [ns.epoch])
         target_dict["batch"].extend(count * [ns.batch])
 
+        return False
+
     def _sub_sample_monitor(
         self, name: str, ns: SimpleNamespace, sel: Optional[Sequence]
-    ):
+    ) -> bool:
         """Observer called to keep track of fast dynamics."""
         target_dict = getattr(self.history, name)
         batch_size = None
@@ -914,6 +963,8 @@ class Trainer:
 
         target_dict["epoch"].extend(count * [ns.epoch])
         target_dict["batch"].extend(count * [ns.batch])
+
+        return False
 
     def _setup_history(self, name: str, vars: Sequence, type: str, size: int = 0):
         """Set up storage for a monitor.
