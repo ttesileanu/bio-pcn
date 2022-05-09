@@ -477,6 +477,31 @@ class LinearBioPCN:
 
         return self
 
+    def clone(self) -> "LinearBioPCN":
+        new = LinearBioPCN(
+            self.dims,
+            self.inter_dims,
+            z_it=self.z_it,
+            z_lr=self.z_lr,
+            g_a=self.g_a,
+            g_b=self.g_b,
+            l_s=self.l_s,
+            c_m=self.c_m,
+            rho=self.rho,
+            bias_a=self.bias_a,
+            bias_b=self.bias_b,
+            fast_optimizer=self.fast_optimizer,
+        )
+
+        for d in self.parameter_groups():
+            name = d["name"]
+            value = d["params"]
+
+            for i in range(len(value)):
+                getattr(new, name)[i] = value[i].detach().clone().requires_grad_()
+
+        return new
+
     def train(self):
         """Set in training mode."""
         self.training = True

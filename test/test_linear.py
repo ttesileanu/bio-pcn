@@ -1295,3 +1295,45 @@ def test_parameters_not_tensors_even_if_fed_tensors(var):
 def test_relax_works_when_called_inside_no_grad(net):
     with torch.no_grad():
         net.relax(torch.FloatTensor([-0.1, 0.2, 0.4]), torch.FloatTensor([0.3, -0.4]))
+
+
+def test_clone(net):
+    torch.manual_seed(0)
+    net_clone = net.clone()
+
+    n_steps = 4
+
+    x = torch.Tensor(n_steps, 3).uniform_()
+    y = torch.Tensor(n_steps, 2).uniform_()
+
+    for crt_net in [net, net_clone]:
+        optimizer = torch.optim.SGD(crt_net.parameters(), lr=1e-3)
+        for i in range(4):
+            ns = crt_net.relax(x[i], y[i])
+            crt_net.calculate_weight_grad(ns)
+            optimizer.step()
+
+    for param1, param2 in zip(net.parameters(), net_clone.parameters()):
+        assert torch.allclose(param1, param2)
+
+
+def test_clone_nontrivial_interneuron_dims(net_inter_dims):
+    net = net_inter_dims
+
+    torch.manual_seed(0)
+    net_clone = net.clone()
+
+    n_steps = 4
+
+    x = torch.Tensor(n_steps, 3).uniform_()
+    y = torch.Tensor(n_steps, 2).uniform_()
+
+    for crt_net in [net, net_clone]:
+        optimizer = torch.optim.SGD(crt_net.parameters(), lr=1e-3)
+        for i in range(4):
+            ns = crt_net.relax(x[i], y[i])
+            crt_net.calculate_weight_grad(ns)
+            optimizer.step()
+
+    for param1, param2 in zip(net.parameters(), net_clone.parameters()):
+        assert torch.allclose(param1, param2)
