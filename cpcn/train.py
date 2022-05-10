@@ -86,6 +86,7 @@ class Trainer:
         self._last_val = None
         self._n_batches = None
         self._optimizer = None
+        self._nan_warned = False
 
         # set up the history with storage for tracking the loss and accuracy
         # (and learning rate)
@@ -837,8 +838,9 @@ class Trainer:
             msg = f"infinity or nan found at batch {ns.batch}"
             if action == "raise":
                 raise DivergenceError(msg)
-            elif action.startswith("warn"):
+            elif action.startswith("warn") and not self._nan_warned:
                 warnings.warn(msg, DivergenceWarning)
+                self._nan_warned = True
 
             if "stop" not in action:
                 terminate = False
@@ -1063,6 +1065,7 @@ class Trainer:
                 history[var] = []
 
         self.checkpoint = {"epoch": [], "batch": [], "model": [], "time": []}
+        self._nan_warned = False
 
     def _coalesce_history(self):
         """Coalesce history into tensor form. Also turn checkpoint epoch and batch into
