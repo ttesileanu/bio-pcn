@@ -9,7 +9,17 @@ import numpy as np
 
 import datetime
 
+import warnings
+
 from .util import one_hot_accuracy, hierarchical_get, pretty_size
+
+
+class DivergenceError(Exception):
+    pass
+
+
+class DivergenceWarning(Warning):
+    pass
 
 
 class Trainer:
@@ -777,7 +787,8 @@ class Trainer:
         every: Optional[int] = None,
         count: Optional[int] = None,
         mask: Optional[Sequence] = None,
-    ):
+        action: str = "warn+stop",
+    ) -> "Trainer":
         """Add an observer that stops the run if any parameters reach infinite or NaN
         values.
         
@@ -786,7 +797,14 @@ class Trainer:
         :param every: store every `every` batches; see `add_observer`
         :param count: store `count` times during a run; see `add_observer`
         :param mask: store whenever `mask[batch]` is true; see `add_observer`
+        :param action: what to do if invalid values are reached:
+            stop:       stop run silently
+            warn:       print a warning and continue
+            warn+stop:  print a warning and stop
+            raise:      raise `DivergenceError`
         """
+        assert action in ["stop", "warn", "warn+stop", "raise"], "unknown action"
+
         # replace old model monitors
         idx = None
         for i, (observer, _, _) in enumerate(self.observers):
@@ -796,10 +814,15 @@ class Trainer:
             self.observers.pop(idx)
 
         return self.add_observer(
-            self._nan_guard, condition=condition, every=every, count=count, mask=mask,
+            lambda ns, action=action: self._nan_guard(ns, action),
+            condition=condition,
+            every=every,
+            count=count,
+            mask=mask,
         )
 
-    def _nan_guard(self, ns: SimpleNamespace) -> bool:
+    def _nan_guard(self, ns: SimpleNamespace, action: str) -> bool:
+        """Observer called to check for NaNs or infinites."""
         terminate = False
         for param in ns.net.parameters():
             if torch.is_tensor(param):
@@ -809,6 +832,16 @@ class Trainer:
                     terminate = terminate or not torch.all(torch.isfinite(layer_param))
 
         terminate = terminate or not np.isfinite(ns.train_loss)
+
+        if terminate:
+            msg = f"infinity or nan found at batch {ns.batch}"
+            if action == "raise":
+                raise DivergenceError(msg)
+            elif action.startswith("warn"):
+                warnings.warn(msg, DivergenceWarning)
+
+            if "stop" not in action:
+                terminate = False
 
         return terminate
 
