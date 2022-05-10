@@ -1,0 +1,6 @@
+*.pkl
+err_*.txt
+out_*.txt
+task_file.db_disBatch_*
+slurm-*.out
+slurm_job_*.*sh
