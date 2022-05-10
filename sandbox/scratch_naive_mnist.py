@@ -53,7 +53,7 @@ net = PCNetwork(
 net = net.to(device)
 
 trainer = Trainer(net, dataset["train"], dataset["validation"])
-trainer.peek_validation(every=10)
+trainer.peek_validation(every=10).add_nan_guard()
 trainer.set_classifier("linear")
 
 trainer.set_optimizer(torch.optim.SGD, lr=0.01)
@@ -67,6 +67,8 @@ trainer.add_scheduler(
     ),
     every=1,
 )
+
+trainer.peek_model(count=4)
 
 results = trainer.run(n_batches=n_batches, progress=tqdm)
 
