@@ -21,14 +21,6 @@ import pickle
 # ## Defining the optimization
 
 
-def optuna_reporter(trial: optuna.trial.Trial, ns: SimpleNamespace):
-    trial.report(ns.val_loss, ns.epoch)
-
-    # early pruning
-    if trial.should_prune():
-        raise optuna.exceptions.TrialPruned()
-
-
 def create_pcn(trial):
     dims = [28 * 28, 5, 10]
 
@@ -65,7 +57,7 @@ def objective(
         lr = trial.suggest_float("lr", 5e-4, 0.05, log=True)
 
         trainer = Trainer(net, dataset["train"], dataset["validation"])
-        trainer.set_optimizer(optimizer_class, lr=lr)
+        trainer.set_optimizer(optimizer_class, lr=lr).add_nan_guard()
 
         lr_power = 1.0
         lr_rate = trial.suggest_float("lr_rate", 1e-5, 0.2, log=True)
@@ -82,7 +74,6 @@ def objective(
 
         trainer.peek_validation(count=10)
 
-        # trainer.add_epoch_observer(lambda ns: optuna_reporter(trial, ns))
         results = trainer.run(n_batches=n_batches)
         scores[i] = results.validation["pc_loss"][-1]
 
@@ -96,7 +87,7 @@ t0 = time.time()
 
 device = torch.device("cpu")
 
-n_batches = 500
+n_batches = 400
 seed = 1927
 n_rep = 5
 
@@ -106,7 +97,7 @@ sampler = optuna.samplers.TPESampler(seed=seed)
 study = optuna.create_study(direction="minimize", sampler=sampler)
 study.optimize(
     lambda trial: objective(trial, n_batches, dataset, device, seed, n_rep),
-    n_trials=25,
+    n_trials=15,
     timeout=15000,
     show_progress_bar=True,
 )
