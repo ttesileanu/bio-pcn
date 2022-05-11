@@ -4,6 +4,8 @@ import torch
 import torchvision
 import numpy as np
 
+import pandas as pd
+
 from types import SimpleNamespace
 from typing import Optional, Callable, Iterable, Union, Sequence
 
@@ -28,6 +30,27 @@ def one_hot_accuracy(y_pred, y) -> float:
     n_correct = y[range(n), idx_pred].sum().item()
 
     return n_correct / n
+
+
+def dot_accuracy(y_pred, y) -> float:
+    """Calculate accuracy in the sense of normalized dot product mapped from 0 to 1.
+    
+    For two vectors `x` and `y`, we consider the following measure of normalized dot
+    product:
+        0.5 * (1 + dot(x, y) / (norm(x) * norm(y))) .
+
+    :param y_pred: prediction; first index = batch
+    :param y: ground truth; first index = batch
+    :return: an indication of the normalized dot product (uncentered correlation)
+        averaged over samples; this will range from 0 to 1
+    """
+    norm_pred = torch.linalg.norm(y_pred, dim=1)
+    norm = torch.linalg.norm(y, dim=1)
+
+    dot = torch.sum(y_pred * y, dim=1)
+
+    accuracy = 0.5 * (1 + dot / (norm_pred * norm))
+    return torch.mean(accuracy).item()
 
 
 def load_mnist(
@@ -117,6 +140,121 @@ def load_mnist(
             )
         else:
             dataset[key] = (input, labels)
+
+    return dataset
+
+
+def load_csv(
+    file_in: str,
+    file_out: str,
+    n_train: Optional[int] = None,
+    n_validation: int = 0,
+    center: bool = True,
+    normalize: bool = True,
+    device: Optional[torch.device] = None,
+    batch_size: int = 128,
+    batch_size_val: int = 1000,
+    return_loaders: bool = True,
+    tidy: Union[bool, str] = "auto",
+    read_csv_kws: Optional[dict] = None,
+) -> dict:
+    """Load a dataset contained in two CSV files and split out a validation set.
+
+    :param file_in: file name for input samples
+    :param file_out: file name for output samples    
+    :param n_train: number of training sample to keep; default: all, except what is used
+        for validation
+    :param n_validation: number of validation samples; default: no validation set
+    :param center: whether to center the samples such that the mean is 0
+    :param normalize: whether to normalize the samples such that the stdev is 1
+    :param device: device to send the data to
+    :param batch_size: if `return_loaders` is true, this sets the batch size used
+    :param batch_size_val: if `return_loaders` is true, this sets the batch size for the
+        validation set
+    :param batch_size_test: if `return_loaders` is true, this sets the batch size for the
+        test set
+    :param return_loaders: if true, data loaders are returned instead of the data sets;
+        only the training loader uses shuffling
+    :param tidy: a boolean, or the string `"auto"`; if true, the data is assumed to be
+        in a "tidy" (long) format -- each row is a sample; if false, the data is assumed
+        to be in the "Wide" format -- each column is a sample; if `"auto"`, the sample
+        index is assumed to be the one that is shared across both input and output, and
+        if both directions are equal, the longer one; (if the length is also the same,
+        tidy format is assumed)
+    :param read_csv_kws: optional arguments to be passed to `pd.read_csv`
+    :return: a dictionary with keys `"train"`, `"validation"`, each of which maps to
+        either a data loader (if `return_loaders` is true), or a tuple of two tensors,
+        one for input, one for labels
+    """
+    # read the data and convert to tensor
+    if read_csv_kws is None:
+        read_csv_kws = {}
+
+    df_in = pd.read_csv(file_in, **read_csv_kws)
+    df_out = pd.read_csv(file_out, **read_csv_kws)
+
+    if tidy == "auto":
+        if df_in.shape == df_out.shape:
+            tidy = df_in.shape[0] >= df_in.shape[1]
+        else:
+            if df_in.shape[0] == df_out.shape[0]:
+                tidy = True
+            elif df_in.shape[1] == df_out.shape[1]:
+                tidy = False
+            else:
+                raise ValueError(
+                    "the input and output datasets have incompatible shapes"
+                )
+
+    data_in = torch.FloatTensor(df_in.values)
+    data_out = torch.FloatTensor(df_out.values)
+
+    if not tidy:
+        data_in.t_()
+        data_out.t_()
+
+    # figure out normalization
+    mu_in = torch.mean(data_in) if center else 0.0
+    scale_in = 1.0 / torch.std(data_in) if normalize else 1.0
+
+    mu_out = torch.mean(data_out) if center else 0.0
+    scale_out = 1.0 / torch.std(data_out) if normalize else 1.0
+
+    # handle defaults
+    if n_train is None:
+        if n_validation is None:
+            n_train = len(data_in)
+            n_validation = 0
+        else:
+            n_train = len(data_in) - n_validation
+
+    # select the requested number of samples
+    dataset = {
+        "train": (data_in[:n_train], data_out[:n_train]),
+        "validation": (data_in[-n_validation:], data_out[-n_validation:]),
+    }
+
+    # pre-process inputs and outputs, as requested
+    for key, (input, output) in dataset.items():
+        input = scale_in * (input - mu_in)
+        output = scale_out * (output - mu_out)
+        if device is not None:
+            input = input.to(device)
+            output = output.to(device)
+
+        if return_loaders:
+            batch_size_dict = {
+                "train": batch_size,
+                "validation": batch_size_val,
+            }
+            tensor_dataset = torch.utils.data.TensorDataset(input, output)
+            dataset[key] = torch.utils.data.DataLoader(
+                tensor_dataset,
+                batch_size=batch_size_dict[key],
+                shuffle=(key == "train"),
+            )
+        else:
+            dataset[key] = (input, output)
 
     return dataset
 
