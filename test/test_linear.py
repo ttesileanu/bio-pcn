@@ -1189,7 +1189,7 @@ def test_from_pcn_copies_over_rho_for_constrained_pcn():
     np.testing.assert_allclose(cpcn.rho, pcn.rho)
 
 
-def test_from_pcn_leaves_rho_untouched_for_constrained_pcn():
+def test_from_pcn_leaves_rho_untouched_for_unconstrained_pcn():
     torch.manual_seed(3)
 
     dims = [2, 4, 3, 8]
