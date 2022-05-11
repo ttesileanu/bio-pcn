@@ -9,12 +9,15 @@ from functools import partial
 from tqdm import tqdm
 
 import torch
-from cpcn import PCNetwork, LinearBioPCN, load_mnist, Trainer
+from cpcn import PCNetwork, LinearBioPCN, load_mnist, load_csv, Trainer
+from cpcn import dot_accuracy, one_hot_accuracy
 
 import optuna
 from optuna.trial import TrialState
 
 import pickle
+
+from typing import Callable
 
 
 def create_net(algo: str, dims: list, rho: float, trial):
@@ -30,6 +33,15 @@ def create_net(algo: str, dims: list, rho: float, trial):
             constrained=True,
             **kwargs,
         )
+    elif algo == "wb":  # Whittington&Bogacz
+        net = PCNetwork(
+            dims,
+            activation="none",
+            variances=1,
+            bias=False,
+            constrained=False,
+            **kwargs,
+        )
     elif algo == "biopcn":
         # set parameters to match a simple PCN network
         g_a = 0.5 * torch.ones(len(dims) - 2)
@@ -42,7 +54,7 @@ def create_net(algo: str, dims: list, rho: float, trial):
             dims, g_a=g_a, g_b=g_b, c_m=0, l_s=g_b, bias_a=False, bias_b=False, **kwargs
         )
     else:
-        raise ValueError(f"unknwon algorithm, {algo}")
+        raise ValueError(f"unknown algorithm, {algo}")
 
     return net
 
@@ -57,6 +69,8 @@ def objective(
     algo: str,
     dims: list,
     rho: float,
+    accuracy_fct: Callable,
+    constraint: bool,
 ) -> float:
     torch.manual_seed(seed)
     seed0 = torch.randint(0, 2_000_000_000, (1,)).item()
@@ -70,6 +84,7 @@ def objective(
         lr = trial.suggest_float("lr", 5e-4, 0.05, log=True)
 
         trainer = Trainer(net, dataset["train"], dataset["validation"])
+        trainer.set_accuracy_fct(accuracy_fct)
         trainer.set_optimizer(optimizer_class, lr=lr).add_nan_guard(count=10)
 
         lr_power = 1.0
@@ -82,8 +97,9 @@ def objective(
             every=1,
         )
 
-        Q_lrf = trial.suggest_float("Q_lrf", 0.1, 20, log=True)
-        trainer.set_lr_factor("Q", Q_lrf)
+        if constraint:
+            Q_lrf = trial.suggest_float("Q_lrf", 0.1, 20, log=True)
+            trainer.set_lr_factor("Q", Q_lrf)
 
         trainer.peek_validation(count=10)
 
@@ -99,8 +115,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run hyperparameter optimization")
 
     parser.add_argument("out", help="output file")
-    parser.add_argument("dataset", help="dataset: mnist or mediamill")
-    parser.add_argument("algo", help="algorithm: pcn or biopcn")
+    parser.add_argument("dataset", help="dataset: mnist or mmill")
+    parser.add_argument("algo", help="algorithm: pcn, biopcn, wb")
     parser.add_argument("arch", help="architecture: one, two, or large-two")
     parser.add_argument("rho", type=float, help="constraint magnitude")
     parser.add_argument("trials", type=int, help="number of trials")
@@ -118,12 +134,22 @@ if __name__ == "__main__":
         device = torch.device("cpu")
     else:
         device = torch.device("cuda")
+    print(device)
 
     t0 = time.time()
     if args.dataset == "mnist":
-        dataset = load_mnist(n_validation=500, batch_size=100)
-    elif args.dataset == "mediamill":
-        raise NotImplementedError("stay tuned for mediamill")
+        dataset = load_mnist(n_validation=500, batch_size=100, device=device)
+        accuracy_fct = one_hot_accuracy
+    elif args.dataset == "mmill":
+        data_path = os.path.join("data", "mediamill")
+        dataset = load_csv(
+            os.path.join(data_path, "view1.csv"),
+            os.path.join(data_path, "view2.csv"),
+            n_validation=500,
+            batch_size=100,
+            device=device,
+        )
+        accuracy_fct = dot_accuracy
     else:
         raise ValueError(f"unknown dataset, {args.dataset}")
 
@@ -134,7 +160,7 @@ if __name__ == "__main__":
     elif args.arch == "large-two":
         hidden_dims = [600, 600]
     else:
-        raise ValueError("unknwon architecture, {args.arch}")
+        raise ValueError("unknown architecture, {args.arch}")
     one_sample = next(iter(dataset["train"]))
     dims = [one_sample[0].shape[-1]] + hidden_dims + [one_sample[1].shape[-1]]
 
@@ -150,6 +176,8 @@ if __name__ == "__main__":
             rho=args.rho,
             seed=args.seed,
             n_rep=args.n_rep,
+            accuracy_fct=accuracy_fct,
+            constraint=args.algo != "wb",
             device=device,
         ),
         n_trials=args.trials,

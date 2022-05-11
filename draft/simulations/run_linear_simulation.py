@@ -51,6 +51,15 @@ def create_net(algo: str, dims: list, rho: float, best_params: dict):
             constrained=True,
             **kwargs,
         )
+    elif algo == "wb":  # Whittington&Bogacz
+        net = PCNetwork(
+            dims,
+            activation="none",
+            variances=1,
+            bias=False,
+            constrained=False,
+            **kwargs,
+        )
     elif algo == "biopcn":
         # set parameters to match a simple PCN network
         g_a = 0.5 * torch.ones(len(dims) - 2)
@@ -74,7 +83,8 @@ def run_simulation(net, n_batches: int, dataset: dict, best_params: dict) -> Tra
 
     optimizer_class = torch.optim.SGD
     trainer.set_optimizer(optimizer_class, lr=best_params["lr"]).add_nan_guard(count=10)
-    trainer.set_lr_factor("Q", best_params["Q_lrf"])
+    if hasattr(net, "Q"):
+        trainer.set_lr_factor("Q", best_params["Q_lrf"])
     trainer.add_scheduler(
         partial(
             torch.optim.lr_scheduler.LambdaLR,
@@ -90,10 +100,14 @@ def run_simulation(net, n_batches: int, dataset: dict, best_params: dict) -> Tra
     trainer.peek_model(count=5)
 
     if hasattr(net, "W_a"):
-        trainer.peek("weight", ["W_a", "W_b", "Q"], count=100)
+        param_list = ["W_a", "W_b"]
     else:
-        trainer.peek("weight", ["W", "Q"], count=100)
+        param_list = ["W"]
 
+    if hasattr(net, "Q"):
+        param_list.append("Q")
+
+    trainer.peek("weight", param_list, count=100)
     trainer.peek_sample("latent", ["z"])
 
     # run
