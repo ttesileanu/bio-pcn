@@ -180,7 +180,7 @@ def show_learning_curves(
                 (results.validation["batch"][-1], val_error_rate[-1]),
                 xytext=(3, 0),
                 textcoords="offset points",
-                c=colors[0],
+                c=colors[1],
                 va="center",
                 fontweight="bold",
             )
