@@ -6,9 +6,10 @@ import matplotlib as mpl
 import seaborn as sns
 
 import torch
+import numpy as np
 
 from types import SimpleNamespace
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Sequence, Callable
 
 
 def show_constraint_diagnostics(
@@ -247,3 +248,67 @@ def show_latent_convergence(
 
     ax.set_xlabel("fast dynamics iteration")
     ax.set_ylabel("latent $(z - z_0) / \\rm{max}| z - z_0|$")
+
+
+def plot_with_error_interval(
+    data: Sequence,
+    ci: float = 0.95,
+    x_var: str = "batch",
+    y_var: str = "pc_loss",
+    mask: Optional[Sequence] = None,
+    center: Callable = np.median,
+    ax: Optional[plt.Axes] = None,
+    fill_kwargs: Optional[dict] = None,
+    **kwargs,
+):
+    """Plot a summary of a set of curves, in terms of a central estimate (e.g., median)
+    and error interval.
+
+    This assumes that all the curves have the same set of `x` values.
+    
+    :param data: list of dictionaries, each representing a curve
+    :param ci: size of confidence interval
+    :param x_var: key in each dictionary of `data` representing values on the `x` axis
+    :param y_var: key in each dictionary of `data` representing values on the `y` axis
+    :param mask: mask used to subselect some of the data
+    :param center: function used for the central estimate; should take an `axis` arg
+    :param ax: axis to draw in; default: `plt.gca()`
+    :param fill_kwargs: keyword arguments to be passed to `plt.fill_between()`
+    :param **kwargs: additional keyword arguments are passed to `plt.plot()` for the
+        central line
+    """
+    # handle defaults
+    if ax is None:
+        ax = plt.gca()
+    if fill_kwargs is None:
+        fill_kwargs = {}
+
+    # parse the data
+    x_values = np.asarray(data[0][x_var])
+    for other in data[1:]:
+        np.testing.assert_allclose(x_values, other[x_var])
+    y_values = np.asarray([np.asarray(_[y_var]) for _ in data])
+
+    # subselect
+    if mask is not None:
+        x_values = x_values[mask]
+        y_values = y_values[:, mask]
+
+    # draw the center line
+    y_center = center(y_values, axis=0)
+    h_center = ax.plot(x_values, y_center, **kwargs)
+
+    # find the uncertainty interval
+    q0 = (1 - ci) / 2
+    q1 = 1 - q0
+    y_low, y_high = np.quantile(y_values, [q0, q1], axis=0)
+
+    # draw the uncertainty interval
+    fill_kwargs.setdefault("color", h_center[0].get_color())
+    fill_kwargs.setdefault("alpha", 0.3)
+    fill_kwargs.setdefault("zorder", h_center[0].get_zorder() - 1.0)
+    if all([_ not in fill_kwargs for _ in ["edgecolor", "edgecolors", "ec"]]):
+        fill_kwargs["edgecolor"] = "none"
+    h_fill = ax.fill_between(x_values, y_low, y_high, **fill_kwargs)
+
+    return SimpleNamespace(h_center=h_center, h_fill=h_fill)
