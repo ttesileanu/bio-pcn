@@ -16,7 +16,7 @@ folder="${dataset}_${algo}_${arch}"
 
 conda activate cpcn
 
-./optimize_one_layer.py \
+./optimize_linear.py \
     "${folder}/hyper_${seed}.pkl" \
     $dataset \
     $algo \
