@@ -159,10 +159,13 @@ if __name__ == "__main__":
         device = torch.device("cpu")
     else:
         device = torch.device("cuda")
+    print(device)
 
     t0 = time.time()
     if args.dataset == "mnist":
-        dataset = load_mnist(n_validation=args.n_validation, batch_size=args.batch_size)
+        dataset = load_mnist(
+            n_validation=args.n_validation, batch_size=args.batch_size, device=device
+        )
     elif args.dataset == "mediamill":
         raise NotImplementedError("stay tuned for mediamill")
     else:
