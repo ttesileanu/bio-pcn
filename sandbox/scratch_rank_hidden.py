@@ -19,7 +19,7 @@ from cpcn.graph import *
 # ## Setup
 
 # %%
-device = torch.device("cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # for reproducibility
 seed = 123
@@ -33,9 +33,11 @@ dataset = load_mnist(n_validation=1000, device=device)
 
 # %%
 n_batches = 3000
-dims = [784, 50, 10]
+dims = [784, 50, 50, 10]
 z_it = 70
 z_lr = 0.1
+
+# %%
 
 torch.manual_seed(seed)
 
@@ -133,10 +135,10 @@ results_cons = trainer_cons.run(n_batches=n_batches, progress=tqdm)
 
 with dv.FigureManager() as (fig, ax):
     show_latent_convergence(results_cons.fast)
-    fig.suptitle("PCN no constraint")
+    fig.suptitle("PCN with constraint")
 
 fig = show_learning_curves(results_cons)
-fig.suptitle("PCN no constraint")
+fig.suptitle("PCN with constraint")
 
 # %% [markdown]
 # ## Check whitening of PCN with constraint
@@ -211,5 +213,25 @@ with dv.FigureManager() as (fig, ax):
     fig.suptitle("BioPCN")
 
 print(f"approximate rank: {torch.sum(cons_diag_cpcn['evals:1'][-1] > crt_thresh)}")
+
+# %%
+
+fig = show_constraint_diagnostics(cons_diag_cpcn, rho=1.0, layer=2)
+fig.suptitle("BioPCN")
+
+crt_log_evals = np.mean(np.log10(cons_diag_cpcn["evals:2"][-50:].numpy()), 0)
+crt_log_dist = np.diff(crt_log_evals)
+crt_idx = crt_log_dist.argmax()
+crt_log_thresh = 0.5 * (crt_log_evals[crt_idx] + crt_log_evals[crt_idx + 1])
+crt_thresh = 10 ** crt_log_thresh
+
+with dv.FigureManager() as (fig, ax):
+    ax.axhline(crt_thresh, c="k", ls="--", lw=1.0)
+    ax.semilogy(cons_diag_cpcn["batch"][-100:], cons_diag_cpcn["evals:2"][-100:])
+    ax.set_xlabel("batch")
+    ax.set_ylabel("evals of $z z^\\top$")
+    fig.suptitle("BioPCN")
+
+print(f"approximate rank: {torch.sum(cons_diag_cpcn['evals:2'][-1] > crt_thresh)}")
 
 # %%
