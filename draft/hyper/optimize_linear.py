@@ -9,7 +9,7 @@ from functools import partial
 from tqdm import tqdm
 
 import torch
-from cpcn import PCNetwork, LinearBioPCN, load_mnist, load_csv, Trainer
+from cpcn import PCNetwork, LinearBioPCN, BioPCN, load_mnist, load_csv, Trainer
 from cpcn import dot_accuracy, one_hot_accuracy
 
 import optuna
@@ -52,6 +52,25 @@ def create_net(algo: str, dims: list, rho: float, trial):
 
         net = LinearBioPCN(
             dims, g_a=g_a, g_b=g_b, c_m=0, l_s=g_b, bias_a=False, bias_b=False, **kwargs
+        )
+    elif algo == "biopcn-nl":
+        # set parameters to match a simple PCN network
+        g_a = 0.5 * torch.ones(len(dims) - 2)
+        g_a[-1] *= 2
+
+        g_b = 0.5 * torch.ones(len(dims) - 2)
+        g_b[0] *= 2
+
+        net = BioPCN(
+            dims,
+            activation="tanh",
+            g_a=g_a,
+            g_b=g_b,
+            c_m=0,
+            l_s=g_b,
+            bias_a=False,
+            bias_b=False,
+            **kwargs,
         )
     else:
         raise ValueError(f"unknown algorithm, {algo}")
@@ -116,7 +135,7 @@ if __name__ == "__main__":
 
     parser.add_argument("out", help="output file")
     parser.add_argument("dataset", help="dataset: mnist or mmill")
-    parser.add_argument("algo", help="algorithm: pcn, biopcn, wb")
+    parser.add_argument("algo", help="algorithm: pcn, biopcn, biopcn-nl, wb")
     parser.add_argument("arch", help="architecture: one, two, or large-two")
     parser.add_argument("rho", type=float, help="constraint magnitude")
     parser.add_argument("trials", type=int, help="number of trials")
