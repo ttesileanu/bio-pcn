@@ -39,7 +39,7 @@ class Trainer:
         also be a string or `None` -- see `set_classifier()`
     :param classifier_optim_class: callable to create the optimizer for the classifier
     :param classifier_optim_kwargs: keyword arguments to pass to `classifier_optim()`
-    :param classifier_criterion: objective fucntion for training classifier; default:
+    :param classifier_criterion: objective function for training classifier; default:
         `MSELoss()`
     :param classifier_dim: which layer of `net` to pass into the classifier
     :param observers: list of tuples `(observer, condition, profile_needed)`; see
