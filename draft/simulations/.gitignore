@@ -6,3 +6,9 @@ task_file_wb.db_disBatch_*
 slurm-*.out
 slurm_job_*.*sh
 *_old.db
+mnist_pcn_*
+mnist_wb_*
+mnist_biopcn_*
+mnist_biopcn-nl_*
+mmill_pcn_*
+*_old.sh
