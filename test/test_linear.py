@@ -1101,23 +1101,26 @@ def test_parameter_groups_contains_expected_names(net, var):
     params = net.parameter_groups()
     names = [_["name"] for _ in params]
 
-    assert var in names
+    for layer in range(len(net.dims) - 2):
+        assert f"{var}:{layer}" in names
 
 
 def test_parameters_no_bias_a(net_no_bias_a):
     params = net_no_bias_a.parameter_groups()
     names = [_["name"] for _ in params]
 
-    assert "h_a" not in names
-    assert "h_b" in names
+    assert not any(_.startswith("h_a:") for _ in names)
+    for layer in range(len(net_no_bias_a.dims) - 2):
+        assert f"h_b:{layer}" in names
 
 
 def test_parameters_no_bias_b(net_no_bias_b):
     params = net_no_bias_b.parameter_groups()
     names = [_["name"] for _ in params]
 
-    assert "h_b" not in names
-    assert "h_a" in names
+    assert not any(_.startswith("h_b:") for _ in names)
+    for layer in range(len(net_no_bias_b.dims) - 2):
+        assert f"h_a:{layer}" in names
 
 
 def test_from_pcn_with_match_weights():

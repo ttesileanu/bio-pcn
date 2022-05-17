@@ -364,11 +364,13 @@ class PCNetwork(object):
         )
 
         for d in self.parameter_groups():
-            name = d["name"]
-            value = d["params"]
+            name_full = d["name"]
+            name, layer_str = name_full.split(":")
+            layer = int(layer_str)
 
-            for i in range(len(value)):
-                getattr(new, name)[i] = value[i].detach().clone().requires_grad_()
+            value = d["params"][0]
+
+            getattr(new, name)[layer] = value.detach().clone().requires_grad_()
 
         return new
 
@@ -396,11 +398,15 @@ class PCNetwork(object):
         parameters.
         """
         groups = []
-        groups.append({"name": "W", "params": self.W})
+        groups.extend({"name": f"W:{i}", "params": [_]} for i, _ in enumerate(self.W))
         if self.constrained:
-            groups.append({"name": "Q", "params": self.Q})
+            groups.extend(
+                {"name": f"Q:{i}", "params": [_]} for i, _ in enumerate(self.Q)
+            )
         if self.bias:
-            groups.append({"name": "h", "params": self.h})
+            groups.extend(
+                {"name": f"h:{i}", "params": [_]} for i, _ in enumerate(self.h)
+            )
 
         return groups
 

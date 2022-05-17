@@ -227,6 +227,11 @@ class Trainer:
             for param in optimizer.param_groups:
                 if param["name"] in self.lr_factors:
                     param["lr"] *= self.lr_factors[param["name"]]
+                else:
+                    # do we have an across-layer factor?
+                    for factor_name, factor in self.lr_factors.items():
+                        if param["name"].startswith(f"{factor_name}:"):
+                            param["lr"] *= factor
 
         if self.classifier is not None:
             if self.classifier_criterion is None:
@@ -544,7 +549,11 @@ class Trainer:
         """Set a scaling factor for the learning rate of a particular parameter group.
         
         :param params: name of a single set of parameters, or iterable of such names;
-            this must match the names returned from `net.parameter_groups()`
+            this must match the names returned from `net.parameter_groups()`, with one
+            possible exception: when the names of the parameter groups contain a colon,
+            the part following the colon is assumed to be a layer identifier; in that
+            case, using a name without a colon in `set_lr_factor()` sets the same factor
+            for all layers
         :param factor: learning-rate factor
         """
         if isinstance(params, str):

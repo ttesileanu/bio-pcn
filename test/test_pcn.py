@@ -771,7 +771,8 @@ def test_parameter_groups_contains_expected_names(net, var):
     params = net.parameter_groups()
     names = [_["name"] for _ in params]
 
-    assert var in names
+    for layer in range(len(net.dims) - 1):
+        assert f"{var}:{layer}" in names
 
 
 def test_parameters_no_bias(net_nb):
@@ -785,14 +786,15 @@ def test_parameters_constraint(net_constraint):
     params = net_constraint.parameter_groups()
     names = [_["name"] for _ in params]
 
-    assert "Q" in names
+    for layer in range(len(net_constraint.dims) - 2):
+        assert f"Q:{layer}" in names
 
 
 def test_parameters_no_constraint(net):
     params = net.parameter_groups()
     names = [_["name"] for _ in params]
 
-    assert "Q" not in names
+    assert not any(_.startswith("Q:") for _ in names)
 
 
 @pytest.mark.parametrize("var", ["variances", "rho"])

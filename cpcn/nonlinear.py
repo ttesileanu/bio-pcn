@@ -489,14 +489,22 @@ class BioPCN:
         parameters.
         """
         groups = []
-        groups.append({"name": "W_a", "params": self.W_a})
-        groups.append({"name": "W_b", "params": self.W_b})
-        groups.append({"name": "Q", "params": self.Q})
-        groups.append({"name": "M", "params": self.M})
+        groups.extend(
+            {"name": f"W_a:{i}", "params": [_]} for i, _ in enumerate(self.W_a)
+        )
+        groups.extend(
+            {"name": f"W_b:{i}", "params": [_]} for i, _ in enumerate(self.W_b)
+        )
+        groups.extend({"name": f"Q:{i}", "params": [_]} for i, _ in enumerate(self.Q))
+        groups.extend({"name": f"M:{i}", "params": [_]} for i, _ in enumerate(self.M))
         if self.bias_a:
-            groups.append({"name": "h_a", "params": self.h_a})
+            groups.extend(
+                {"name": f"h_a:{i}", "params": [_]} for i, _ in enumerate(self.h_a)
+            )
         if self.bias_b:
-            groups.append({"name": "h_b", "params": self.h_b})
+            groups.extend(
+                {"name": f"h_b:{i}", "params": [_]} for i, _ in enumerate(self.h_b)
+            )
 
         return groups
 
@@ -538,11 +546,13 @@ class BioPCN:
         )
 
         for d in self.parameter_groups():
-            name = d["name"]
-            value = d["params"]
+            name_full = d["name"]
+            name, layer_str = name_full.split(":")
+            layer = int(layer_str)
 
-            for i in range(len(value)):
-                getattr(new, name)[i] = value[i].detach().clone().requires_grad_()
+            value = d["params"][0]
+
+            getattr(new, name)[layer] = value.detach().clone().requires_grad_()
 
         return new
 
