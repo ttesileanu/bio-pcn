@@ -197,11 +197,17 @@ def show_learning_curves(
     return fig
 
 
-def show_weight_evolution(x: torch.Tensor, weights: torch.Tensor, ax: plt.Axes):
+def show_weight_evolution(
+    x: torch.Tensor, weights: torch.Tensor, ax: plt.Axes, max_lines: int = 10000
+):
     weights = weights.reshape(len(weights), -1)
     n_lines = weights.shape[1]
+    if n_lines > max_lines:
+        idxs = torch.linspace(0, n_lines - 1, max_lines).long()
+        weights = weights[:, idxs]
+        n_lines = max_lines
     alpha = max(min(50 / n_lines, 0.5), 0.01)
-    ax.plot(x, weights, c="k", lw=0.5, alpha=alpha)
+    ax.plot(x.numpy(), weights.numpy(), c="k", lw=0.5, alpha=alpha)
 
     ax.set_xlabel("batch")
     ax.set_ylabel("weight")
