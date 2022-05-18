@@ -33,7 +33,7 @@ class Trainer:
     :param optimizer_class: callable to create the optimizer to use; default: Adam
     :param optimizer_kwargs: keyword arguments to pass to the `optimizer()`
     :param accuracy_fct: function used to calculate accuracy; called as
-        `accuracy_fct(y, y_pred)`, where `y` is ground truth, `y_pred` is prediction
+        `accuracy_fct(y_pred, y)`, where `y_pred` is prediction, `y` is ground truth
     :param classifier: this can be a trainable neural network used to predict the output
         samples from the `dim`th layer of `net` after a call to `net.forward()`; it can
         also be a string or `None` -- see `set_classifier()`
@@ -53,6 +53,12 @@ class Trainer:
     :param schedulers: list of tuples `(scheduler, condition)` of learning-rate
         scheduler constructors and the conditions under which they should be called
     :param lr_factors: dictionary of learning-rate scaling factors
+    :param evaluators: dictionary of named evaluators, callables that use the batch
+        input and output, `x` and `y`, as well as a namespace `ns` with additional
+        information to return a tensor; see `add_evaluator`
+    :param prediction_error_fct: function used to calculate the prediction error; called
+        as `prediction_error_fct(y_pred, y)`, where `y_pred` is prediction, `y` is
+        ground truth
     """
 
     def __init__(self, net, train_loader: Iterable, validation_loader: Iterable):
@@ -71,6 +77,7 @@ class Trainer:
         self.lr_factors = {}
 
         self.accuracy_fct = one_hot_accuracy
+        self.prediction_error_fct = torch.nn.MSELoss()
 
         self.classifier = None
         self.classifier_optim_class = torch.optim.Adam
@@ -80,18 +87,23 @@ class Trainer:
 
         self.observers = []
         self.schedulers = []
+        self.evaluators = {}
         self.validation_condition = None  # see call to `peek_validation` below
 
         # these will be set by `run`
         self._last_val = None
         self._n_batches = None
         self._optimizer = None
+        self._classifier_optim = None
         self._nan_warned = False
 
         # set up the history with storage for tracking the loss and accuracy
         # (and learning rate)
         self.history = SimpleNamespace()
-        self._setup_history("all_train", ["pc_loss", "accuracy", "lr"], "batch", size=1)
+        self.add_evaluator("pc_loss", self._pc_loss_evaluator)
+        self.add_evaluator("accuracy", self._accuracy_evaluator)
+        self.add_evaluator("prediction_error", self._prediction_error_evaluator)
+        self._setup_history("all_train", ["lr"], "batch", size=1)
         self._setup_history("train", ["pc_loss", "accuracy"], "batch", size=1)
         self._setup_history("validation", ["pc_loss", "accuracy"], "batch", size=1)
 
@@ -123,6 +135,7 @@ class Trainer:
         # initialization work
         optimizer, classifier_optim = self._setup_optimizers()
         self._optimizer = optimizer
+        self._classifier_optim = classifier_optim
 
         self.net.train()
         if self.classifier:
@@ -161,25 +174,27 @@ class Trainer:
 
             # train main net, asking for loss+latent profile if needed for obsevers
             observers, need_profile = self._get_observers(batch)
+            z_fwd = self.net.forward(x)
             batch_results = self.net.relax(
                 x, y, pc_loss_profile=need_profile, latent_profile=need_profile
             )
             with torch.no_grad():
-                pc_loss = self.net.pc_loss(batch_results.z).item()
+                ns = SimpleNamespace(
+                    epoch=epoch,
+                    batch=batch,
+                    batch_results=batch_results,
+                    fwd_results=z_fwd,
+                    net=self.net,
+                    trainer=self,
+                )
+                self._run_evaluators(x, y, ns)
+
             self.net.calculate_weight_grad(batch_results)
             optimizer.step()
 
-            # use and train classifier, if we have one
-            y_pred = self._get_and_train_prediction(x, y, classifier_optim)
-
             with torch.no_grad():
-                # keep track of per-batch indicators
-                accuracy = self.accuracy_fct(y_pred, y)
-
                 # call any batch observers; this also stores training-mode diagnostics
-                terminate = self._report(
-                    observers, epoch, batch, pc_loss, accuracy, batch_results
-                )
+                terminate = self._report(observers, epoch, batch, batch_results)
                 if self.validation_condition(batch):
                     # this fills out the `validation` and `train` fields of history
                     self._validation_run(epoch, batch)
@@ -260,32 +275,30 @@ class Trainer:
         return observers, need_profile
 
     def _get_and_train_prediction(
-        self, x: torch.Tensor, y: torch.Tensor, classifier_optim: Callable
+        self, y: torch.Tensor, z_fwd: Sequence,
     ) -> torch.Tensor:
         """Get prediction, using the classifier (if any), and train the classifier (if
-        any).
+        any, and if in training mode).
         """
-        z_fwd = self.net.forward(x)
         if self.classifier is not None:
-            y_pred = self.classifier(z_fwd[self.classifier_dim])
-
-            classifier_optim.zero_grad()
-            classifier_loss = self.classifier_criterion(y_pred, y)
-            classifier_loss.backward()
-            classifier_optim.step()
+            if self.classifier.training:
+                classifier_optim = self._classifier_optim
+                with torch.enable_grad():
+                    y_pred = self.classifier(z_fwd[self.classifier_dim])
+                    classifier_optim.zero_grad()
+                    classifier_loss = self.classifier_criterion(y_pred, y)
+                    classifier_loss.backward()
+                    classifier_optim.step()
+            else:
+                y_pred = self.classifier(z_fwd[self.classifier_dim])
+                classifier_loss = self.classifier_criterion(y_pred, y)
         else:
             y_pred = z_fwd[-1]
 
         return y_pred
 
     def _report(
-        self,
-        observers: list,
-        epoch: int,
-        batch: int,
-        pc_loss: float,
-        accuracy: float,
-        batch_results: SimpleNamespace,
+        self, observers: list, epoch: int, batch: int, batch_results: SimpleNamespace,
     ):
         """Send per-batch information to a list of observers, and store training-mode
         diagnostics in `self.history`.
@@ -299,18 +312,16 @@ class Trainer:
                 batch_results=batch_results,
                 classifier=self.classifier,
                 trainer=self,
-                train_loss=pc_loss,
-                train_accuracy=accuracy,
             )
             for observer in observers:
                 terminate = terminate or observer(batch_ns)
 
         # keep track of loss and accuracy
         target_dict = self.history.all_train
-        target_dict["epoch"].append(epoch)
-        target_dict["batch"].append(batch)
-        target_dict["pc_loss"].append(torch.FloatTensor([pc_loss]))
-        target_dict["accuracy"].append(torch.FloatTensor([accuracy]))
+        # target_dict["epoch"].append(epoch)
+        # target_dict["batch"].append(batch)
+        # target_dict["pc_loss"].append(torch.FloatTensor([pc_loss]))
+        # target_dict["accuracy"].append(torch.FloatTensor([accuracy]))
         lr = self._optimizer.param_groups[0]["lr"]
         target_dict["lr"].append(torch.FloatTensor([lr]))
 
@@ -321,39 +332,72 @@ class Trainer:
         self.net.eval()
         if self.classifier:
             self.classifier.eval()
-        pc_loss, accuracy = evaluate(
-            self.net,
-            self.validation_loader,
-            accuracy_fct=self.accuracy_fct,
-            classifier=self.classifier,
-            classifier_dim=self.classifier_dim,
+        evaluations = evaluate(
+            self.net, self.validation_loader, self.evaluators, trainer=self,
         )
-        pc_loss = torch.mean(torch.FloatTensor([pc_loss]))
-        accuracy = torch.mean(torch.FloatTensor([accuracy]))
 
         target_dict = self.history.validation
         target_dict["epoch"].append(epoch)
         target_dict["batch"].append(batch)
-        target_dict["pc_loss"].append(torch.FloatTensor([pc_loss]))
-        target_dict["accuracy"].append(torch.FloatTensor([accuracy]))
+        for name, values in evaluations.items():
+            mean = torch.mean(torch.cat(values))
+            target_dict[name].append(mean.expand(1))
 
-        # fill out average performance on training set
         all_train = self.history.all_train
-        last_losses = all_train["pc_loss"][self._last_val :]
-        last_accuracies = all_train["accuracy"][self._last_val :]
-        avg_pc_loss = torch.mean(torch.FloatTensor([last_losses]))
-        avg_accuracy = torch.mean(torch.FloatTensor([last_accuracies]))
         target_dict = self.history.train
         target_dict["epoch"].append(epoch)
         target_dict["batch"].append(batch)
-        target_dict["pc_loss"].append(torch.FloatTensor([avg_pc_loss]))
-        target_dict["accuracy"].append(torch.FloatTensor([avg_accuracy]))
+        for name, values in evaluations.items():
+            last_train_values = all_train[name][self._last_val :]
+            train_mean = torch.mean(torch.cat(last_train_values))
+            target_dict[name].append(train_mean.expand(1))
+
         self._last_val = len(all_train["pc_loss"])
 
         # switch back to training mode
         self.net.train()
         if self.classifier:
             self.classifier.train()
+
+    def _run_evaluators(self, x: torch.Tensor, y: torch.Tensor, ns: SimpleNamespace):
+        """Run evaluators for training mode."""
+        for name, evaluator in self.evaluators.items():
+            result = evaluator(x, y, ns)
+            target_dict = self.history.all_train
+            target_dict["epoch"].append(ns.epoch)
+            target_dict["batch"].append(ns.batch)
+
+            target_dict[name].append(result.detach().cpu())
+
+    @staticmethod
+    def _pc_loss_evaluator(
+        x: torch.Tensor, y: torch.Tensor, ns: SimpleNamespace
+    ) -> torch.Tensor:
+        pc_loss = ns.net.pc_loss(ns.batch_results.z)
+        return pc_loss.expand(1)
+
+    @staticmethod
+    def _accuracy_evaluator(
+        x: torch.Tensor, y: torch.Tensor, ns: SimpleNamespace
+    ) -> torch.Tensor:
+        # use and train classifier, if we have one
+        y_pred = ns.trainer._get_and_train_prediction(y, ns.fwd_results)
+        accuracy = ns.trainer.accuracy_fct(y_pred, y)
+        return torch.FloatTensor([accuracy])
+
+    @staticmethod
+    def _prediction_error_evaluator(
+        x: torch.Tensor, y: torch.Tensor, ns: SimpleNamespace
+    ) -> torch.Tensor:
+        z_fwd = ns.fwd_results
+        # use classifier, if we have one
+        if ns.trainer.classifier is not None:
+            y_pred = ns.trainer.classifier(z_fwd[ns.trainer.classifier_dim])
+        else:
+            y_pred = z_fwd[-1]
+
+        prediction_error = ns.trainer.prediction_error_fct(y_pred, y)
+        return torch.FloatTensor([prediction_error])
 
     def _pbar_report(self, epoch: int, batch: int) -> dict:
         """Generate `dict` of progress information for the progress bar."""
@@ -510,8 +554,6 @@ class Trainer:
             batch_results:  namespace returned by `net.relax()`
             trainer:        the `Trainer` object, `self`
             classifier:     network used for classifier output (if any)
-            train_loss:     (predictive-coding) loss on training set
-            train_accuracy: accuracy on training set
         If the observer returns true, the run is terminated prematurely.
 
             (if `profile == True`)
@@ -539,8 +581,8 @@ class Trainer:
     def set_accuracy_fct(self, accuracy_fct: Callable) -> "Trainer":
         """Set the function used to calculate accuracy scores.
         
-        This is called as `accuracy_fct(y, y_pred)`, where `y` is ground truth, `y_pred`
-        is prediction.
+        This is called as `accuracy_fct(y_pred, y)`, where `y_pred` is prediction, `y`
+        is ground truth.
         """
         self.accuracy_fct = accuracy_fct
         return self
@@ -791,6 +833,38 @@ class Trainer:
         self.schedulers.append((scheduler, condition))
         return self
 
+    def add_evaluator(self, name: str, evaluator: Callable) -> "Trainer":
+        """Add an evaluator.
+        
+        An evaluator is run for every training and validation batch, with the signature
+            evaluator(x, y, ns) -> torch.Tensor
+        where `x` and `y` are the batch input and output, while `ns` is a namespace with
+        batch information. It contains:
+            batch_results:  output from last call to `relax`
+            fwd_results:    output from call to `forward`
+            epoch:          current epoch
+            batch:          current batch
+            net:            network being trained
+            trainer:        trainer object
+
+        The output from each evaluator is stored in `self.history`, under `all_train`,
+        `train`, or `validation`. Note that evaluators are run for each training batch,
+        as well as for each validation batch.
+
+        Evaluators are run under `no_grad()`.
+        
+        The predictive-coding loss and accuracy are implemented as evaluators.
+
+        :param name: name to associate to the evaluator results
+        :param evaluator: callable that performs the evaluation
+        """
+        self.evaluators[name] = evaluator
+
+        self._setup_history("all_train", [name], "batch", size=1)
+        self._setup_history("train", [name], "batch", size=1)
+        self._setup_history("validation", [name], "batch", size=1)
+        return self
+
     def add_nan_guard(
         self,
         condition: Optional[Callable] = None,
@@ -841,7 +915,8 @@ class Trainer:
                 for layer_param in param:
                     terminate = terminate or not torch.all(torch.isfinite(layer_param))
 
-        terminate = terminate or not np.isfinite(ns.train_loss)
+        train_loss = self.history.all_train["pc_loss"][-1].item()
+        terminate = terminate or not np.isfinite(train_loss)
 
         if terminate:
             msg = f"infinity or nan found at batch {ns.batch}"
@@ -1033,7 +1108,11 @@ class Trainer:
         else:
             test_object = self.net
 
-        storage = {}
+        # XXX might be better to warn if overwriting something
+        if hasattr(self.history, name):
+            storage = getattr(self.history, name)
+        else:
+            storage = {}
         for var in vars:
             layered = False
             crt_size = size
@@ -1096,42 +1175,31 @@ class Trainer:
         self.checkpoint["batch"] = torch.IntTensor(self.checkpoint["batch"])
 
 
-def evaluate(
-    net,
-    loader,
-    accuracy_fct: Callable = one_hot_accuracy,
-    classifier: Optional[Callable] = None,
-    classifier_dim: int = -2,
-) -> tuple:
+def evaluate(net, loader, evaluators: dict, **kwargs) -> dict:
     """Evaluate PCN or CPCN network on a test / validation set.
     
     :param net: network whose performance to evaluate; should have `pc_loss()` member
     :param loader: data loader for the test / validation set
-    :param accuracy_fct: function used to calculate accuracy; called as
-        `accuracy_fct(y_pred, y)`, where `y_pred` is prediction and `y` is ground truth
-    :param classifier: classifier to use to obtain predictions from the network; this is
-        applied to the output from the `classifier_dim`th layer; if it is not provided,
-        the output from `net.forward()` is used
-    :param classifier_dim: layer of `net` to use with the classifier
-    :return: tuple of Numpy arrays (PC_loss, accuracy), where `PC_loss` is the
-        predictive-coding loss for each batch, as returned by `net.pc_loss()` after a
-        run of `net.relax()`; the accuracy is calculated based on the
-        output from either the classifier (if given) or `net.forward()`, using the given
-        `accuracy_fct()`
+    :param evaluators: dictionary of evaluators to run for each batch; the results are
+        returned in the output dictionary; see `Trainer.add_evaluator`
+    :param **kwargs: additional arguments to pass to the namespace that gets sent to
+        each evaluator
+    :return: dictionary of lists of torch tensors -- the outputs from the evaluators
     """
-    loss = []
-    accuracy = []
+    res = {_: [] for _ in evaluators}
     for x, y in loader:
-        ns = net.relax(x, y)
-        loss.append(net.pc_loss(ns.z).item())
+        z_fwd = net.forward(x)
+        batch_results = net.relax(x, y)
 
-        # figure out model predictions
-        z_pred = net.forward(x)
-        if classifier is not None:
-            y_pred = classifier(z_pred[classifier_dim])
-        else:
-            y_pred = z_pred[-1]
+        ns = SimpleNamespace(**kwargs)
+        ns.batch_results = batch_results
+        ns.fwd_results = z_fwd
+        ns.epoch = -1
+        ns.batch = -1
+        ns.net = net
 
-        accuracy.append(accuracy_fct(y_pred, y))
+        for name, evaluator in evaluators.items():
+            value = evaluator(x, y, ns)
+            res[name].append(value.detach().cpu())
 
-    return loss, accuracy
+    return res
