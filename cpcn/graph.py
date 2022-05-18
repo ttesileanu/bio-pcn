@@ -92,6 +92,7 @@ def show_learning_curves(
     annotate_val: bool = True,
     labels: Tuple[str] = ("train", "val"),
     colors: Tuple[str] = ("C0", "C1"),
+    var_names: Tuple[str, str] = ("pc_loss", "accuracy"),
     plot_kwargs: Optional[dict] = None,
 ) -> plt.Figure:
     """Make plot of predictive-coding loss and classification error rate.
@@ -104,6 +105,7 @@ def show_learning_curves(
     :param annotate_final: whether to annotate the final value
     :param labels: how to label the curves
     :param colors: how to color the curves
+    :param var_names: tuple of variable names to plot, `(lhs, rhs)`
     :param plot_kwargs: keyword arguments to pass to plot
     :return: the Matplotlib figure that is created
     """
@@ -124,7 +126,7 @@ def show_learning_curves(
     if show_train:
         ax1.plot(
             results.train["batch"],
-            results.train["pc_loss"],
+            results.train[var_names[0]],
             label=labels[0],
             c=colors[0],
             **plot_kwargs,
@@ -133,15 +135,15 @@ def show_learning_curves(
     if show_val:
         ax1.plot(
             results.validation["batch"],
-            results.validation["pc_loss"],
+            results.validation[var_names[0]],
             label=labels[1],
             c=colors[1],
             **plot_kwargs,
         )
         if annotate_val:
             ax1.annotate(
-                f"{results.validation['pc_loss'][-1]:.2g}",
-                (results.validation["batch"][-1], results.validation["pc_loss"][-1]),
+                f"{results.validation[var_names[0]][-1]:.2g}",
+                (results.validation["batch"][-1], results.validation[var_names[0]][-1]),
                 xytext=(3, 0),
                 textcoords="offset points",
                 c=colors[1],
@@ -152,12 +154,23 @@ def show_learning_curves(
     ax1.legend(frameon=False)
     ax1.set_yscale("log")
     ax1.set_xlabel("batch")
-    ax1.set_ylabel("predictive-coding loss")
+    if var_names[0] == "pc_loss":
+        ax1.set_ylabel("predictive-coding loss")
+    else:
+        ax1.set_ylabel(var_names[0])
 
-    val_error_rate = 100 * (1.0 - results.validation["accuracy"])
+    if var_names[1] == "accuracy":
+        val_error_rate = 100 * (1.0 - results.validation[var_names[1]])
+        acc_suffix = "%"
+    else:
+        val_error_rate = results.validation[var_names[1]]
+        acc_suffix = ""
 
     if show_train:
-        train_error_rate = 100 * (1.0 - results.train["accuracy"])
+        if var_names[1] == "accuracy":
+            train_error_rate = 100 * (1.0 - results.train[var_names[1]])
+        else:
+            train_error_rate = results.train[var_names[1]]
         ax2.plot(
             results.train["batch"],
             train_error_rate,
@@ -176,7 +189,7 @@ def show_learning_curves(
         )
         if annotate_val:
             ax2.annotate(
-                f"{val_error_rate[-1]:.1f}%",
+                f"{val_error_rate[-1]:.2f}{acc_suffix}",
                 (results.validation["batch"][-1], val_error_rate[-1]),
                 xytext=(3, 0),
                 textcoords="offset points",
@@ -188,7 +201,10 @@ def show_learning_curves(
     ax2.legend(frameon=False)
     ax2.set_ylim(0, None)
     ax2.set_xlabel("batch")
-    ax2.set_ylabel("error rate (%)")
+    if var_names[1] == "accuracy":
+        ax2.set_ylabel("error rate (%)")
+    else:
+        ax2.set_ylabel(var_names[1])
 
     for ax in [ax1, ax2]:
         sns.despine(ax=ax, offset=10)
