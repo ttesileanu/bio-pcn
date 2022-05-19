@@ -155,8 +155,8 @@ batch_size = 100
 max_batches = {"one": 1000, "two": 1000, "large-two": 3000, "large_small": 5000}
 for arch, histories in all_histories.items():
     fig, ax = make_plot(histories, batch_size=batch_size, max_batch=max_batches[arch])
-    # fig.savefig(osp.join(fig_path, f"linear_{arch}_pc_loss.png"), dpi=300)
-    fig.savefig(osp.join(fig_path, f"linear_{arch}_pc_loss.svg"))
+    fig.savefig(osp.join(fig_path, f"linear_{arch}_pc_loss.png"), dpi=600)
+    # fig.savefig(osp.join(fig_path, f"linear_{arch}_pc_loss.pdf"))
 
 # %%
 
@@ -171,8 +171,9 @@ for arch, histories in all_histories.items():
         max_batch=max_batches[arch],
         y_var="prediction_error",
     )
-    # fig.savefig(osp.join(fig_path, f"linear_{arch}_pred_err.png"), dpi=300)
-    fig.savefig(osp.join(fig_path, f"linear_{arch}_pred_err.pdf"))
+    ax.set_ylabel("mean squared error")
+    fig.savefig(osp.join(fig_path, f"linear_{arch}_pred_err.png"), dpi=600)
+    # fig.savefig(osp.join(fig_path, f"linear_{arch}_pred_err.pdf"))
 
 # %%
 
@@ -190,7 +191,7 @@ _ = show_constraint_diagnostics(crt_cons_diag, layer=2, rho=crt_rho[1])
 for layer in range(len(crt_rho)):
     with plt.style.context(paper_style):
         with dv.FigureManager(
-            figsize=(2.75, 2), despine_kws={"offset": 5}, tight_layout=False
+            figsize=(2.75, 2), despine_kws={"offset": 5}, constrained_layout=True
         ) as (
             fig,
             ax,
@@ -208,7 +209,7 @@ for layer in range(len(crt_rho)):
 
             ax.set_xscale("log")
 
-            iax = fig.add_axes([0.6, 0.57, 0.22, 0.30])
+            iax = fig.add_axes([0.7, 0.7, 0.22, 0.30])
             crt_cov = crt_cons_diag[f"cov:{l}"][-1].numpy()
             crt_lim = np.max(np.abs(crt_cov))
             h = iax.imshow(crt_cov, vmin=-crt_lim, vmax=crt_lim, cmap="RdBu_r")
@@ -221,8 +222,11 @@ for layer in range(len(crt_rho)):
             cb = dv.colorbar(h)
             cb.ax.tick_params(length=0, pad=1)
             crt_quant_lim = int(10 * crt_lim) / 10
-            cb.ax.set_yticks([-crt_quant_lim, 0, crt_quant_lim])
+            cb.set_ticks([-crt_quant_lim, 0, crt_quant_lim])
 
-        fig.savefig(osp.join(fig_path, f"linear_large_small_constraint_{l}.pdf"))
+        # fig.savefig(osp.join(fig_path, f"linear_large_small_constraint_{l}.pdf"))
+        fig.savefig(
+            osp.join(fig_path, f"linear_large_small_constraint_{l}.png"), dpi=600
+        )
 
 # %%
