@@ -327,7 +327,11 @@ def get_constraint_diagnostics(
         res[cov_name] = crt_cov
 
         if hasattr(rho, "__getitem__"):
-            crt_rho = rho[int(layer)]
+            i = int(layer) - 1
+            if i >= 0 and i < len(rho):
+                crt_rho = rho[i]
+            else:
+                crt_rho = 1.0
         else:
             crt_rho = rho
         res["trace:" + layer] = torch.FloatTensor(
