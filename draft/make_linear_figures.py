@@ -24,7 +24,23 @@ from cpcn.graph import plot_with_error_interval, show_constraint_diagnostics
 
 paper_style = [
     "seaborn-paper",
-    {"font.size": 8, "axes.labelsize": 8, "xtick.labelsize": 6, "ytick.labelsize": 6},
+    {
+        "font.size": 7,
+        "axes.labelsize": 7,
+        "axes.labelpad": 1,
+        "xtick.labelsize": 6,
+        "ytick.labelsize": 6,
+        "legend.fontsize": 6,
+        "xtick.major.pad": 1,
+        "ytick.major.pad": 1,
+        "xtick.major.size": 1,
+        "ytick.major.size": 1,
+        "xtick.minor.size": 0.75,
+        "ytick.minor.size": 0.75,
+        "legend.labelspacing": 0,
+        "legend.handlelength": 1.5,
+        "axes.linewidth": 0.5,
+    },
 ]
 
 label_map = {"wb": "PC", "biopcn": "BioCCPC", "pcn": "PC + cons"}
@@ -64,19 +80,25 @@ def make_plot(
     histories: dict,
     max_batch: int,
     batch_size: int,
-    figsize: tuple = (2.75, 2),
+    min_batch: int = 1,
+    figsize: tuple = (1.75, 1.25),
     y_var: str = "pc_loss",
 ) -> Tuple[plt.Figure, plt.Axes]:
     with plt.style.context(paper_style):
-        with dv.FigureManager(figsize=figsize, despine_kws={"offset": 5}) as (fig, ax):
+        with dv.FigureManager(
+            figsize=figsize, despine_kws={"offset": 2}, constrained_layout=True
+        ) as (fig, ax):
             for net_type in histories:
                 crt_data = [_.validation for _ in histories[net_type]]
                 # XXX this changes it in place!
                 for _ in crt_data:
                     _["sample"] = batch_size * _["batch"]
+                crt_min_mask = crt_data[0]["batch"] >= min_batch
+                crt_max_mask = crt_data[0]["batch"] < max_batch
+                crt_mask = crt_min_mask & crt_max_mask
                 plot_with_error_interval(
                     crt_data,
-                    mask=crt_data[0]["batch"] < max_batch,
+                    mask=crt_mask,
                     c=color_map[net_type],
                     lw=1,
                     x_var="sample",
@@ -85,21 +107,31 @@ def make_plot(
                     **style_map[net_type],
                 )
 
+            legend_elements = []
             for net_type in histories:
-                ax.plot(
-                    [],
-                    [],
-                    c=color_map[net_type],
-                    label=label_map[net_type],
-                    **style_map[net_type],
+                legend_elements.append(
+                    plt.Line2D(
+                        [1],
+                        [1],
+                        color=color_map[net_type],
+                        label=label_map[net_type],
+                        **style_map[net_type],
+                    )
                 )
+                # ax.plot(
+                #     [],
+                #     [],
+                #     c=color_map[net_type],
+                #     label=label_map[net_type],
+                #     **style_map[net_type],
+                # )
+            ax.legend(handles=legend_elements, frameon=False)
 
             ax.set_xlabel("iteration")
             if y_var == "pc_loss":
-                ax.set_ylabel("predictive-coding loss")
+                ax.set_ylabel("PC loss")
             else:
                 ax.set_ylabel(y_var)
-            ax.legend(frameon=False)
 
             ax.set_yscale("log")
             ax.set_xscale("log")
@@ -155,8 +187,8 @@ batch_size = 100
 max_batches = {"one": 1000, "two": 1000, "large-two": 3000, "large_small": 5000}
 for arch, histories in all_histories.items():
     fig, ax = make_plot(histories, batch_size=batch_size, max_batch=max_batches[arch])
-    fig.savefig(osp.join(fig_path, f"linear_{arch}_pc_loss.png"), dpi=600)
-    # fig.savefig(osp.join(fig_path, f"linear_{arch}_pc_loss.pdf"))
+    # fig.savefig(osp.join(fig_path, f"linear_{arch}_pc_loss.png"), dpi=600)
+    fig.savefig(osp.join(fig_path, f"linear_{arch}_pc_loss.pdf"))
 
 # %%
 
@@ -172,8 +204,8 @@ for arch, histories in all_histories.items():
         y_var="prediction_error",
     )
     ax.set_ylabel("mean squared error")
-    fig.savefig(osp.join(fig_path, f"linear_{arch}_pred_err.png"), dpi=600)
-    # fig.savefig(osp.join(fig_path, f"linear_{arch}_pred_err.pdf"))
+    # fig.savefig(osp.join(fig_path, f"linear_{arch}_pred_err.png"), dpi=600)
+    fig.savefig(osp.join(fig_path, f"linear_{arch}_pred_err.pdf"))
 
 # %%
 
@@ -188,10 +220,34 @@ _ = show_constraint_diagnostics(crt_cons_diag, layer=2, rho=crt_rho[1])
 
 # %%
 
+
+def rolling_average(y: torch.Tensor, n: int) -> torch.Tensor:
+    if y.ndim < 2:
+        y = y.unsqueeze(1)
+        was_unsqueezed = True
+    else:
+        was_unsqueezed = False
+
+    pad_front = torch.zeros_like(y[0])
+    pad_back = y[-1].expand(n - 1, -1)
+    y_padded = torch.vstack((pad_front, y, pad_back))
+
+    y_cumul = torch.cumsum(y_padded, dim=0)
+    y_roll = (y_cumul[n:] - y_cumul[:-n]) / n
+
+    if was_unsqueezed:
+        y_roll.squeeze_(1)
+
+    return y_roll
+
+
+# %%
+
+roll_n = 5
 for layer in range(len(crt_rho)):
     with plt.style.context(paper_style):
         with dv.FigureManager(
-            figsize=(2.75, 2), despine_kws={"offset": 5}, constrained_layout=True
+            figsize=(1.75, 1.25), despine_kws={"offset": 2}, constrained_layout=True
         ) as (
             fig,
             ax,
@@ -199,17 +255,21 @@ for layer in range(len(crt_rho)):
             crt_x = (crt_cons_diag["batch"] * batch_size).numpy()
 
             l = layer + 1
-            crt_y = crt_cons_diag[f"evals:{l}"].numpy()
-            ax.axhline(crt_rho[layer], c="k", ls="--", zorder=-1)
+            crt_y = rolling_average(crt_cons_diag[f"evals:{l}"], roll_n).numpy()
+            ax.axhline(crt_rho[layer], c="k", ls="--", lw=1.0, zorder=-1)
             ax.plot(crt_x, crt_y, c=color_map["biopcn"], lw=0.5, alpha=0.7, zorder=1)
             ax.set_xlabel("iteration")
 
             cov_str = f"${{\\bb E}}\\left[z^{{({l})}} z^{{({l})\\top}}\\right]$"
-            ax.set_ylabel(f"evals of {cov_str}")
+            # ax.set_ylabel(f"evals of {cov_str}")
+            ax.set_ylabel("covariance evals")
 
             ax.set_xscale("log")
 
-            iax = fig.add_axes([0.7, 0.7, 0.22, 0.30])
+            # ax.set_ylim(max(0, ax.get_ylim()[0]), None)
+            ax.set_ylim(0, 3 * crt_rho[layer])
+
+            iax = fig.add_axes([0.65, 0.60, 0.25, 0.30])
             crt_cov = crt_cons_diag[f"cov:{l}"][-1].numpy()
             crt_lim = np.max(np.abs(crt_cov))
             h = iax.imshow(crt_cov, vmin=-crt_lim, vmax=crt_lim, cmap="RdBu_r")
@@ -217,16 +277,17 @@ for layer in range(len(crt_rho)):
             iax.set_yticks([-0.5, len(crt_cov) - 0.5])
             iax.set_yticklabels(["0", str(len(crt_cov))])
             iax.tick_params(axis="both", which="both", length=0)
-            iax.set_xlabel(cov_str, fontsize=6, labelpad=1)
+            iax.set_xlabel(cov_str, fontsize=6, labelpad=2)
+            iax.xaxis.set_label_position('top')
 
             cb = dv.colorbar(h)
             cb.ax.tick_params(length=0, pad=1)
             crt_quant_lim = int(10 * crt_lim) / 10
             cb.set_ticks([-crt_quant_lim, 0, crt_quant_lim])
 
-        # fig.savefig(osp.join(fig_path, f"linear_large_small_constraint_{l}.pdf"))
-        fig.savefig(
-            osp.join(fig_path, f"linear_large_small_constraint_{l}.png"), dpi=600
-        )
+        fig.savefig(osp.join(fig_path, f"linear_large_small_constraint_{l}.pdf"))
+        # fig.savefig(
+        #     osp.join(fig_path, f"linear_large_small_constraint_{l}.png"), dpi=600
+        # )
 
 # %%
