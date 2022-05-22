@@ -2,6 +2,7 @@ from types import SimpleNamespace
 import pytest
 
 import torch
+import numpy as np
 
 from cpcn.train import Trainer
 from unittest.mock import Mock
@@ -120,3 +121,24 @@ def test_batch_feed_calls_calculate_weight_grad_with_fast(trainer):
         ns = batch.feed(net)
 
     net.calculate_weight_grad.assert_called_once_with(ns.fast)
+
+
+def test_batch_contains_batch_index(trainer):
+    n = 10
+    for i, batch in enumerate(trainer(n)):
+        assert i == batch.idx
+
+
+def test_batch_every(trainer):
+    n = 12
+    s = 3
+    for batch in trainer(n):
+        assert batch.every(s) == ((batch.idx % s) == 0)
+
+
+def test_batch_count(trainer):
+    n = 25
+    c = 13
+    idxs = np.linspace(0, n - 1, c).astype(int)
+    for batch in trainer(n):
+        assert batch.count(c) == (batch.idx in idxs)

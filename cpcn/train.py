@@ -9,9 +9,11 @@ from typing import Iterable
 class TrainerBatch:
     """Handle for one training batch."""
 
-    def __init__(self, x: torch.Tensor, y: torch.Tensor):
+    def __init__(self, x: torch.Tensor, y: torch.Tensor, idx: int, n: int):
         self.x = x
         self.y = y
+        self.idx = idx
+        self.n = n
 
     def feed(self, net, **kwargs) -> SimpleNamespace:
         """Feed the batch to the network's `relax` method and calculate gradients.
@@ -29,6 +31,23 @@ class TrainerBatch:
         net.calculate_weight_grad(ns.fast)
 
         return ns
+
+    def every(self, step: int) -> bool:
+        """Return true every `step` steps."""
+        return self.idx % step == 0
+
+    def count(self, total: int) -> bool:
+        """Return true a total of `total` times.
+        
+        Including first and last batch.
+        """
+        # should be true when batch = floor(k * (n - 1) / (total - 1)) for integer k
+        # this implies (batch * (total - 1)) % (n - 1) == 0 or > (n - total).
+        if total == 1:
+            return self.idx == 0
+        else:
+            mod = (self.idx * (total - 1)) % (self.n - 1)
+            return mod == 0 or mod > self.n - total
 
 
 class _TrainerIterator:
@@ -48,7 +67,7 @@ class _TrainerIterator:
                 self.it = iter(self.iterable)
                 x, y = next(self.it)
 
-            batch = TrainerBatch(x=x, y=y)
+            batch = TrainerBatch(x=x, y=y, idx=self.i, n=self.n)
             self.i += 1
 
             return batch
