@@ -3,17 +3,20 @@
 from types import SimpleNamespace
 import torch
 
-from typing import Iterable
+from typing import Iterable, Optional
 
 
 class TrainerBatch:
     """Handle for one training batch."""
 
-    def __init__(self, x: torch.Tensor, y: torch.Tensor, idx: int, n: int):
+    def __init__(
+        self, x: torch.Tensor, y: torch.Tensor, idx: int, n: int, training: bool
+    ):
         self.x = x
         self.y = y
         self.idx = idx
         self.n = n
+        self.training = training
 
     def feed(self, net, **kwargs) -> SimpleNamespace:
         """Feed the batch to the network's `relax` method and calculate gradients.
@@ -27,8 +30,9 @@ class TrainerBatch:
         res = net.relax(self.x, self.y, **kwargs)
         ns = SimpleNamespace(x=self.x, y=self.y, fast=res)
 
-        # calculate gradients
-        net.calculate_weight_grad(ns.fast)
+        if self.training:
+            # calculate gradients
+            net.calculate_weight_grad(ns.fast)
 
         return ns
 
@@ -53,9 +57,10 @@ class TrainerBatch:
 class _TrainerIterator:
     """Iterator used by Trainer."""
 
-    def __init__(self, loader: Iterable, n: int):
+    def __init__(self, loader: Iterable, n: int, training: bool):
         self.iterable = loader
         self.n = n
+        self.training = training
         self.i = 0
         self.it = iter(self.iterable)
 
@@ -67,7 +72,7 @@ class _TrainerIterator:
                 self.it = iter(self.iterable)
                 x, y = next(self.it)
 
-            batch = TrainerBatch(x=x, y=y, idx=self.i, n=self.n)
+            batch = TrainerBatch(x=x, y=y, idx=self.i, n=self.n, training=self.training)
             self.i += 1
 
             return batch
@@ -78,15 +83,34 @@ class _TrainerIterator:
 class TrainerIterable:
     """Iterable returned by calling a Trainer."""
 
-    def __init__(self, trainer: "Trainer", n_batches: int):
+    def __init__(
+        self,
+        trainer: "Trainer",
+        n_batches: int,
+        loader: Optional[Iterable] = None,
+        training: bool = True,
+    ):
         self.trainer = trainer
         self.n_batches = n_batches
+        self.loader = self.trainer.loader if loader is None else loader
+        self.training = training
 
     def __iter__(self) -> _TrainerIterator:
-        return _TrainerIterator(self.trainer.loader, self.n_batches)
+        return _TrainerIterator(self.loader, self.n_batches, self.training)
 
     def __len__(self) -> int:
         return self.n_batches
+
+
+class TrainerEvaluateIterable(TrainerIterable):
+    """Iterable for running a validation run."""
+
+    def __init__(self, trainer: "Trainer", loader: Iterable):
+        super().__init__(trainer, len(loader), training=False, loader=loader)
+
+    def run(self, net):
+        for batch in self:
+            batch.feed(net)
 
 
 class Trainer:
@@ -101,3 +125,6 @@ class Trainer:
     def __len__(self) -> int:
         """Trainer length equals the length of the loader."""
         return len(self.loader)
+
+    def evaluate(self, val_loader: Iterable) -> TrainerEvaluateIterable:
+        return TrainerEvaluateIterable(self, val_loader)
