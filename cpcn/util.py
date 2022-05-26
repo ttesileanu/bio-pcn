@@ -189,6 +189,7 @@ def load_csv(
     # read the data and convert to tensor
     if read_csv_kws is None:
         read_csv_kws = {}
+    read_csv_kws.setdefault("header", None)
 
     df_in = pd.read_csv(file_in, **read_csv_kws)
     df_out = pd.read_csv(file_out, **read_csv_kws)
