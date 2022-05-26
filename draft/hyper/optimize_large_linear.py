@@ -98,7 +98,7 @@ def objective(
         )
 
         if constraint:
-            Q_lrf = trial.suggest_float("Q_lrf", 0.1, 20, log=True)
+            Q_lrf = trial.suggest_float("Q_lrf", 0.1, 10, log=True)
             trainer.set_lr_factor("Q", Q_lrf)
 
         if hasattr(net, "W_a") and hasattr(net, "W_b"):
@@ -119,7 +119,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run hyperparameter optimization")
 
     parser.add_argument("out", help="output file")
+    parser.add_argument("dataset", help="dataset: mnist or mmill")
     parser.add_argument("algo", help="algorithm: pcn, biopcn, wb")
+    parser.add_argument("rho", type=float, help="constraint magnitude layer 1")
     parser.add_argument("trials", type=int, help="number of trials")
     parser.add_argument("seed", type=int, help="starting random number seed")
 
@@ -138,7 +140,21 @@ if __name__ == "__main__":
     print(device)
 
     t0 = time.time()
-    dataset = load_mnist(n_validation=500, batch_size=100, device=device)
+    if args.dataset == "mnist":
+        dataset = load_mnist(n_validation=500, batch_size=100, device=device)
+        accuracy_fct = one_hot_accuracy
+    elif args.dataset == "mmill":
+        data_path = os.path.join("data", "mediamill")
+        dataset = load_csv(
+            os.path.join(data_path, "view1.csv"),
+            os.path.join(data_path, "view2.csv"),
+            n_validation=500,
+            batch_size=100,
+            device=device,
+        )
+        accuracy_fct = dot_accuracy
+    else:
+        raise ValueError(f"unknown dataset, {args.dataset}")
     hidden_dims = [50, 5]
 
     one_sample = next(iter(dataset["train"]))
@@ -153,10 +169,10 @@ if __name__ == "__main__":
             dataset=dataset,
             algo=args.algo,
             dims=dims,
-            rho=[1.0, 0.1],
+            rho=[args.rho, args.rho / 10.0],
             seed=args.seed,
             n_rep=args.n_rep,
-            accuracy_fct=one_hot_accuracy,
+            accuracy_fct=accuracy_fct,
             constraint=args.algo != "wb",
             device=device,
         ),

@@ -12,7 +12,9 @@ rho=$5
 
 trials=100
 
-folder="${dataset}_${algo}_${arch}"
+folder="${dataset}_${algo}_${arch}_rho${rho}"
+
+mkdir -p ${folder}/log
 
 conda activate cpcn
 

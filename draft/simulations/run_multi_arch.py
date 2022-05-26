@@ -131,12 +131,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "outdir",
         help="base output folder; saving results under"
-        "${outdir}/${dataset}_${algo}_${arch}/",
+        "${outdir}/${dataset}_${algo}_${arch}_rho${rho}/",
     )
     parser.add_argument(
         "hyperdir",
-        help="base hyperparam optimization folder; "
-        "looking for hyper_*.pkl files in ${hyperdir}/${dataset}_${algo}_${arch}/",
+        help="hyperparam optimization folder in which to look for hyper_*.pkl files",
     )
     parser.add_argument("dataset", help="dataset: mnist or mediamill")
     parser.add_argument("algo", help="algorithm: wb, pcn, or biopcn")
@@ -144,7 +143,7 @@ if __name__ == "__main__":
     parser.add_argument("rho", type=float, help="constraint magnitude")
     parser.add_argument("seed", type=int, help="starting random number seed")
 
-    parser.add_argument("--n-batches", type=int, default=3000, help="number of batches")
+    parser.add_argument("--n-batches", type=int, default=5000, help="number of batches")
     parser.add_argument(
         "--n-validation", type=int, default=2000, help="number of validation samples"
     )
@@ -152,7 +151,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--lr-scale",
         type=float,
-        default=0.80,
+        default=0.50,
         help="scale factor for learning rate -- safety margin against divergence",
     )
 
@@ -190,6 +189,14 @@ if __name__ == "__main__":
         hidden_dims = [5]
     elif args.arch == "two":
         hidden_dims = [10, 5]
+    elif args.arch == "two-big":
+        hidden_dims = [25, 5]
+    elif args.arch == "two-bigger":
+        hidden_dims = [50, 5]
+    elif args.arch == "two-biggest":
+        hidden_dims = [100, 5]
+    elif args.arch == "two-giant":
+        hidden_dims = [200, 5]
     elif args.arch == "large-two":
         hidden_dims = [600, 600]
     else:
@@ -198,8 +205,7 @@ if __name__ == "__main__":
     dims = [one_sample[0].shape[-1]] + hidden_dims + [one_sample[1].shape[-1]]
 
     # create network using parameters from hyperparam optimization
-    subfolder = f"{args.dataset}_{args.algo}_{args.arch}_rho{args.rho}"
-    folder = osp.join(args.hyperdir, subfolder)
+    folder = args.hyperdir
     hyperparams = read_best_hyperparams(folder, args.lr_scale)
     print(hyperparams)
     torch.manual_seed(args.seed)
@@ -222,6 +228,7 @@ if __name__ == "__main__":
     trainer.history.constraint = cons_diag
 
     # save to file
+    subfolder = f"{args.dataset}_{args.algo}_{args.arch}_rho{args.rho}_multi"
     outhistory = osp.join(args.outdir, subfolder, f"history_{args.seed}.pkl")
     with open(outhistory, "wb") as f:
         pickle.dump(trainer.history, f)

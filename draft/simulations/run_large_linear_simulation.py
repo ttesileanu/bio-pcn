@@ -12,7 +12,13 @@ from tqdm import tqdm
 import torch
 import numpy as np
 from cpcn import PCNetwork, LinearBioPCN, Trainer
-from cpcn import load_mnist, get_constraint_diagnostics
+from cpcn import (
+    load_mnist,
+    get_constraint_diagnostics,
+    load_csv,
+    one_hot_accuracy,
+    dot_accuracy,
+)
 
 import pickle
 
@@ -134,7 +140,9 @@ if __name__ == "__main__":
         help="base hyperparam optimization folder; "
         "looking for hyper_*.pkl files in ${hyperdir}/${dataset}_${algo}_${arch}/",
     )
+    parser.add_argument("dataset", help="dataset: mnist or mediamill")
     parser.add_argument("algo", help="algorithm: wb, pcn, or biopcn")
+    parser.add_argument("rho", type=float, help="constraint magnitude in layer 1")
     parser.add_argument("seed", type=int, help="starting random number seed")
 
     parser.add_argument("--n-batches", type=int, default=5000, help="number of batches")
@@ -148,6 +156,7 @@ if __name__ == "__main__":
         default=0.80,
         help="scale factor for learning rate -- safety margin against divergence",
     )
+    parser.add_argument("--save-suffix", default="", help="suffix for save folder")
 
     args = parser.parse_args()
 
@@ -161,21 +170,35 @@ if __name__ == "__main__":
     print(device)
 
     t0 = time.time()
-    dataset = load_mnist(
-        n_validation=args.n_validation, batch_size=args.batch_size, device=device
-    )
+    if args.dataset == "mnist":
+        dataset = load_mnist(
+            n_validation=args.n_validation, batch_size=args.batch_size, device=device
+        )
+        accuracy_fct = one_hot_accuracy
+    elif args.dataset == "mmill":
+        data_path = os.path.join("data", "mediamill")
+        dataset = load_csv(
+            os.path.join(data_path, "view1.csv"),
+            os.path.join(data_path, "view2.csv"),
+            n_validation=args.n_validation,
+            batch_size=args.batch_size,
+            device=device,
+        )
+        accuracy_fct = dot_accuracy
+    else:
+        raise ValueError(f"unknown dataset, {args.dataset}")
 
     hidden_dims = [50, 5]
     one_sample = next(iter(dataset["train"]))
     dims = [one_sample[0].shape[-1]] + hidden_dims + [one_sample[1].shape[-1]]
 
     # create network using parameters from hyperparam optimization
-    subfolder = f"mnist_{args.algo}_large_small"
+    subfolder = f"{args.dataset}_{args.algo}_large_rho{args.rho}"
     folder = osp.join(args.hyperdir, subfolder)
     hyperparams = read_best_hyperparams(folder, args.lr_scale)
     print(hyperparams)
     torch.manual_seed(args.seed)
-    net = create_net(args.algo, dims, [1.0, 0.1], hyperparams).to(device)
+    net = create_net(args.algo, dims, [args.rho, args.rho / 10], hyperparams).to(device)
 
     # run the simulation
     trainer = run_simulation(net, args.n_batches, dataset, best_params=hyperparams)
@@ -194,11 +217,15 @@ if __name__ == "__main__":
     trainer.history.constraint = cons_diag
 
     # save to file
-    outhistory = osp.join(args.outdir, subfolder, f"history_{args.seed}.pkl")
+    outhistory = osp.join(
+        args.outdir, subfolder + args.save_suffix, f"history_{args.seed}.pkl"
+    )
     with open(outhistory, "wb") as f:
         pickle.dump(trainer.history, f)
 
-    outcheckpoints = osp.join(args.outdir, subfolder, f"checkpoints_{args.seed}.pkl")
+    outcheckpoints = osp.join(
+        args.outdir, subfolder + args.save_suffix, f"checkpoints_{args.seed}.pkl"
+    )
     with open(outcheckpoints, "wb") as f:
         pickle.dump(trainer.checkpoint, f)
 

@@ -2,27 +2,27 @@
 
 source ~/.bashrc
 
-# run_once <seed> <dataset> <algo> <arch> <rho>
+# run_once_large <seed> <dataset> <algo> <rho>
 
 seed=$1
 dataset=$2
 algo=$3
-arch=$4
-rho=$5
+rho=$4
 
-conda activate cpcn
+trials=100
 
-folder="${dataset}_${algo}_${arch}_rho${rho}"
+folder="${dataset}_${algo}_large_rho${rho}"
 
 mkdir -p ${folder}/log
 
-./run_linear_simulation.py \
-    . \
-    ../hyper/ \
+conda activate cpcn
+
+./optimize_large_linear.py \
+    "${folder}/hyper_${seed}.pkl" \
     $dataset \
     $algo \
-    $arch \
     $rho \
+    $trials \
     $seed \
     > "${folder}/log/out_${seed}.txt" \
     2> "${folder}/log/err_${seed}.txt"

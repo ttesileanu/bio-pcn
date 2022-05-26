@@ -148,6 +148,9 @@ if __name__ == "__main__":
 
     torch.set_num_threads(1)
 
+    if args.arch == "small":
+        args.arch = "one"
+
     # using the GPU hinders more than helps for the smaller models
     if args.arch in ["one", "two"] or not torch.cuda.is_available():
         device = torch.device("cpu")
