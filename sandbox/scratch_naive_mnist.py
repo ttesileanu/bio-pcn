@@ -32,7 +32,7 @@ dataset = load_mnist(n_validation=1000, device=device)
 
 # %%
 n_batches = 3000
-dims = [784, 5, 10]
+dims = [784, 30, 5, 10]
 z_it = 50
 z_lr = 0.062
 rho = 0.015
@@ -54,7 +54,7 @@ net = net.to(device)
 
 trainer = Trainer(net, dataset["train"], dataset["validation"])
 trainer.peek_validation(every=10).add_nan_guard()
-trainer.set_classifier("linear")
+# trainer.set_classifier("linear")
 
 trainer.set_optimizer(torch.optim.SGD, lr=0.01)
 trainer.set_lr_factor("Q", 0.11)
@@ -78,6 +78,7 @@ results = trainer.run(n_batches=n_batches, progress=tqdm)
 # %%
 
 _ = show_learning_curves(results)
+_ = show_learning_curves(results, var_names=("pc_loss", "prediction_error"))
 
 # %% [markdown]
 # ## Train BioPCN
@@ -146,6 +147,24 @@ with dv.FigureManager(1, 2) as (_, axs):
         show_train=False,
         labels=("", "BioPCN"),
         colors=("C0", "red"),
+        axs=axs,
+    )
+
+with dv.FigureManager(1, 2) as (_, axs):
+    show_learning_curves(
+        results,
+        show_train=False,
+        labels=("", "Whittington&Bogacz"),
+        colors=("C0", "gray"),
+        var_names=("pc_loss", "prediction_error"),
+        axs=axs,
+    )
+    show_learning_curves(
+        biopcn_results,
+        show_train=False,
+        labels=("", "BioPCN"),
+        colors=("C0", "red"),
+        var_names=("pc_loss", "prediction_error"),
         axs=axs,
     )
 
