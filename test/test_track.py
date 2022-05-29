@@ -224,6 +224,15 @@ def test_report_raises_if_mixing_meld_with_non_meld(tracker):
         tracker.report.test("bar", 0, torch.FloatTensor([[1, 2], [3, 4]]))
 
 
+def test_report_overwrite_after_other_report(tracker):
+    tracker.report.test("foo", 0, torch.FloatTensor([1, 2]))
+    tracker.report.test("bidx", 0, 1, overwrite=True)
+    tracker.finalize()
+
+    assert "bidx" in tracker.history.test
+    assert len(tracker.history.test["bidx"]) == 1
+
+
 def test_report_keeps_last_entry_if_overwrite_true(tracker):
     x0 = torch.FloatTensor([1, 2, 3])
     x1 = torch.FloatTensor([2, 3, 4])

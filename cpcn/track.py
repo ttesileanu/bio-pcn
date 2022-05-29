@@ -85,20 +85,18 @@ class _Reporter:
             idxs.append(torch.LongTensor(len(value) * [idx]))
             target[field].append(value)
         else:
-            if overwrite:
-                target[field][-1] = value
+            # no need to add another entry in index array...
+            # ...but did we already have an entry in this field?
+            if len(target[field]) < len(idxs):
+                # make sure the length of this value entry matches previous ones for the
+                # same index
+                if len(value) != len(idxs[-1]):
+                    raise ValueError("Tracker: mismatched batch size for meld == True")
+                # no; add the entry
+                target[field].append(value)
             else:
-                # no need to add another entry in index array...
-                # ...but did we already have an entry in this field?
-                if len(target[field]) < len(idxs):
-                    # make sure the length of this value entry matches previous ones for the
-                    # same index
-                    if len(value) != len(idxs[-1]):
-                        raise ValueError(
-                            "Tracker: mismatched batch size for meld == True"
-                        )
-                    # no; add the entry
-                    target[field].append(value)
+                if overwrite:
+                    target[field][-1] = value
                 else:
                     if len(value) > 1:
                         raise ValueError(
