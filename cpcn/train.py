@@ -70,6 +70,7 @@ class TrainerBatch:
         sample_idx: int,
         training: bool,
         tracker: "Tracker",
+        iterator: "_TrainerIterator",
     ):
         self.x = x
         self.y = y
@@ -82,6 +83,8 @@ class TrainerBatch:
         self.training = training
         self.tracker = tracker
         self.report = _BatchReporter(self)
+
+        self._iterator = iterator
 
     def feed(self, net, **kwargs) -> SimpleNamespace:
         """Feed the batch to the network's `relax` method and calculate gradients.
@@ -118,6 +121,15 @@ class TrainerBatch:
             mod = (self.idx * (total - 1)) % (self.n - 1)
             return mod == 0 or mod > self.n - total
 
+    def terminate(self):
+        """Terminate the run early.
+        
+        Note that this does not stop the iteration instantly, but instead ends it the
+        first time a new batch is requested. Put differently, the remaining of the `for`
+        loop will still be run before it terminates.
+        """
+        self._iterator.terminating = True
+
     def __len__(self) -> int:
         """Number of samples in batch."""
         return len(self.x)
@@ -136,8 +148,10 @@ class _TrainerIterator:
         self.sample = 0
         self.it = iter(self.iterable)
 
+        self.terminating = False
+
     def __next__(self) -> TrainerBatch:
-        if self.i < self.n:
+        if self.i < self.n and not self.terminating:
             try:
                 x, y = next(self.it)
             except StopIteration:
@@ -152,6 +166,7 @@ class _TrainerIterator:
                 sample_idx=self.sample,
                 training=self.training,
                 tracker=self.tracker,
+                iterator=self,
             )
             self.i += 1
             self.sample += len(batch)

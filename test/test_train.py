@@ -317,3 +317,23 @@ def test_batch_keeps_track_of_sample_index(trainer):
     for batch in trainer(10):
         assert batch.sample_idx == crt_sample
         crt_sample += len(batch)
+
+
+def test_batch_terminate_ends_iteration(trainer):
+    count = 0
+    n = 5
+    for batch in trainer(10):
+        count += 1
+        if batch.idx == n - 1:
+            batch.terminate()
+
+    assert count == n
+
+
+def test_batch_terminate_only_terminates_at_the_end_of_the_for_loop(trainer):
+    count = 0
+    for batch in trainer(5):
+        batch.terminate()
+        count += 1
+
+    assert count == 1
