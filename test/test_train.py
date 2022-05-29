@@ -4,8 +4,10 @@ import pytest
 import torch
 import numpy as np
 
+from cpcn import train
 from cpcn.train import Trainer
-from unittest.mock import Mock
+from cpcn.track import Tracker
+from unittest.mock import Mock, patch
 
 
 def generate_loader(
@@ -246,3 +248,72 @@ def test_evaluate_run_iterates_and_feeds_through_all_dataset(trainer, val_loader
     trainer.evaluate(val_loader).run(net)
 
     assert net.relax.call_count == len(val_loader)
+
+
+def test_trainer_has_tracker(trainer):
+    assert hasattr(trainer, "tracker")
+    assert isinstance(trainer.tracker, Tracker)
+
+
+def test_trainer_history_is_shared_with_tracker_history(trainer):
+    assert trainer.tracker.history is trainer.history
+
+
+def test_tracker_index_name_is_batch(trainer):
+    assert trainer.tracker.index_name == "batch"
+
+
+def test_report_calls_tracker_report(trainer):
+    trainer = Trainer(generate_loader())
+    with patch.object(trainer.tracker, "report", wraps=trainer.tracker.report) as mock:
+        for batch in trainer(1):
+            batch.report.test("foo", 2.0)
+
+        mock.test.assert_called()
+
+
+def test_report_fills_in_batch(trainer):
+    for batch in trainer(3):
+        batch.report.test("foo", 2.0)
+
+    assert hasattr(trainer.history, "test")
+    assert "batch" in trainer.history.test
+    assert len(trainer.history.test["batch"]) == 3
+    assert torch.allclose(trainer.history.test["batch"], torch.arange(3))
+
+
+def test_report_fills_in_sample(trainer):
+    for batch in trainer(3):
+        batch.report.test("foo", 2.0)
+
+    assert len(trainer.history.test["sample"]) == 3
+
+    batch_size = len(batch.x)
+    assert torch.allclose(trainer.history.test["sample"], torch.arange(3) * batch_size)
+
+
+def test_end_of_iteration_calls_tracker_finalized(trainer):
+    for batch in trainer(2):
+        batch.report.test("foo", 1.0)
+
+    assert trainer.tracker.finalized
+
+
+def test_end_of_evaluate_iteration_does_not_finalize_tracker(trainer, val_loader):
+    net = Mock()
+    net.relax.return_value = SimpleNamespace()
+    trainer.evaluate(val_loader).run(net)
+
+    assert not trainer.tracker.finalized
+
+
+def test_batch_len(trainer):
+    for batch in trainer(3):
+        assert len(batch) == len(batch.x)
+
+
+def test_batch_keeps_track_of_sample_index(trainer):
+    crt_sample = 0
+    for batch in trainer(10):
+        assert batch.sample_idx == crt_sample
+        crt_sample += len(batch)
