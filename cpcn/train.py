@@ -2,10 +2,21 @@
 
 from types import SimpleNamespace
 import torch
+import numpy as np
+
+import warnings
 
 from typing import Iterable, Optional
 
 from cpcn.track import Tracker
+
+
+class DivergenceError(Exception):
+    pass
+
+
+class DivergenceWarning(Warning):
+    pass
 
 
 class _BatchReporter:
@@ -19,13 +30,43 @@ class _BatchReporter:
         return lambda *args, _name=name, **kwargs: self._report(_name, *args, **kwargs)
 
     def _report(self, name: str, *args, **kwargs):
+        idx = self._batch.idx
+        sample_idx = self._batch.sample_idx
+
+        if kwargs.pop("check_nan", False):
+            nan_action = self._batch._iterator.trainer.nan_action
+
+            if nan_action != "none":
+                value = args[1]
+                valid = True
+                if torch.is_tensor(value):
+                    valid = torch.all(torch.isfinite(value))
+                elif hasattr(value, "__iter__"):
+                    for elem in value:
+                        if torch.is_tensor(elem):
+                            if not torch.all(torch.isfinite(elem)):
+                                valid = False
+                                break
+                        else:
+                            if not np.all(np.isfinite(value)):
+                                valid = False
+                                break
+                else:
+                    valid = np.all(np.isfinite(value))
+
+                if not valid:
+                    if nan_action in ["stop", "raise", "warn+stop"]:
+                        self._batch.terminate(divergence_error=nan_action == "raise")
+                    if nan_action in ["warn", "warn+stop"]:
+                        msg = f"divergence at batch {idx}, sample {sample_idx}"
+                        warnings.warn(msg, DivergenceWarning)
+
         report = getattr(self._tracker.report, name)
-        report(args[0], self._batch.idx, *args[1:], **kwargs)
+        report(args[0], idx, *args[1:], **kwargs)
 
         target_dict = getattr(self._tracker.history, name)
         n = len(target_dict["batch"][-1])
 
-        sample_idx = self._batch.sample_idx
         report(
             "sample",
             self._batch.idx,
@@ -44,8 +85,16 @@ class TrainerBatch:
     The monitoring facility is used by employing the `report` construction; e.g.,
         batch.report.weight("W", net.W[0])
     reports the networks first `W` tensor inside the `weight` namespace under the name
-    `"W"`. `batch.report` automatically assign `batch` index and `sample` index to the
+    `"W"`. `batch.report` automatically assigns `batch` index and `sample` index to the
     reported value.
+
+    A check for invalid values can be done automatically like this:
+        batch.report.score("L", some_loss(net), check_nan=True)
+    Note that despite the name, this checks for either `nan`s or infinities in the
+    values that are reported. If such an invalid value is found, `batch.terminate()` is
+    called so that the iteration ends on the next step. Depending on the trainer
+    settings, the termination can either be silent, or it can be accompanied by a
+    warning or an exception. See `Trainer`.
 
     Attributes:
     :param x: input batch
@@ -85,6 +134,7 @@ class TrainerBatch:
         self.report = _BatchReporter(self)
 
         self._iterator = iterator
+        self._trainer = self._iterator.trainer
 
     def feed(self, net, **kwargs) -> SimpleNamespace:
         """Feed the batch to the network's `relax` method and calculate gradients.
@@ -121,14 +171,19 @@ class TrainerBatch:
             mod = (self.idx * (total - 1)) % (self.n - 1)
             return mod == 0 or mod > self.n - total
 
-    def terminate(self):
+    def terminate(self, divergence_error: bool = False):
         """Terminate the run early.
         
         Note that this does not stop the iteration instantly, but instead ends it the
         first time a new batch is requested. Put differently, the remaining of the `for`
         loop will still be run before it terminates.
+
+        :param divergence_error: if true, raises a `DivergenceError` the next time a new
+            batch is requested
         """
         self._iterator.terminating = True
+        if divergence_error:
+            self._iterator.divergence = True
 
     def __len__(self) -> int:
         """Number of samples in batch."""
@@ -138,31 +193,35 @@ class TrainerBatch:
 class _TrainerIterator:
     """Iterator used by Trainer."""
 
-    def __init__(self, loader: Iterable, n: int, training: bool, tracker: Tracker):
-        self.iterable = loader
-        self.n = n
-        self.training = training
-        self.tracker = tracker
+    def __init__(self, iterable: "TrainerIterable"):
+        self.iterable = iterable
+        self.trainer = self.iterable.trainer
+        self.loader = self.iterable.loader
+        self.n_batches = self.iterable.n_batches
+        self.training = self.iterable.training
+
+        self.tracker = self.trainer.tracker
 
         self.i = 0
         self.sample = 0
-        self.it = iter(self.iterable)
+        self.it = iter(self.loader)
 
         self.terminating = False
+        self.divergence = False
 
     def __next__(self) -> TrainerBatch:
-        if self.i < self.n and not self.terminating:
+        if self.i < self.n_batches and not self.terminating:
             try:
                 x, y = next(self.it)
             except StopIteration:
-                self.it = iter(self.iterable)
+                self.it = iter(self.loader)
                 x, y = next(self.it)
 
             batch = TrainerBatch(
                 x=x,
                 y=y,
                 idx=self.i,
-                n=self.n,
+                n=self.n_batches,
                 sample_idx=self.sample,
                 training=self.training,
                 tracker=self.tracker,
@@ -177,6 +236,11 @@ class _TrainerIterator:
             if self.training:
                 # ...but only if it is the end of the *training* run!
                 self.tracker.finalize()
+
+                if self.divergence:
+                    raise DivergenceError(
+                        f"divergence at batch {self.i}, sample {self.sample}"
+                    )
             raise StopIteration
 
 
@@ -201,9 +265,7 @@ class TrainerIterable:
         self.training = training
 
     def __iter__(self) -> _TrainerIterator:
-        return _TrainerIterator(
-            self.loader, self.n_batches, self.training, self.trainer.tracker
-        )
+        return _TrainerIterator(self)
 
     def __len__(self) -> int:
         return self.n_batches
@@ -241,10 +303,21 @@ class Trainer:
     :param history: reference to the tracker's history namespace
     """
 
-    def __init__(self, loader: Iterable):
+    def __init__(self, loader: Iterable, nan_action: str = "none"):
+        """Initialize trainer.
+        
+        :param loader: iterable of `(input, output)` tuples
+        :param nan_action: action to take in case a check for invalid values fails:
+            "none":         do nothing
+            "stop":         stop run silently
+            "warn":         print a warning and continue
+            "warn+stop":    print a warning and stop
+            "raise":        raise `DivergenceError`
+        """
         self.loader = loader
         self.tracker = Tracker(index_name="batch")
         self.history = self.tracker.history
+        self.nan_action = "none"
 
     def __call__(self, n_batches: int) -> TrainerIterable:
         return TrainerIterable(self, n_batches)
