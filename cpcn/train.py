@@ -6,7 +6,7 @@ import numpy as np
 
 import warnings
 
-from typing import Iterable, Optional
+from typing import Iterable
 
 from cpcn.track import Tracker
 
@@ -19,10 +19,47 @@ class DivergenceWarning(Warning):
     pass
 
 
+class Batch:
+    """Handle for one batch of a dataset.
+    
+    This helps evaluate a network on a batch.
+
+    Attributes:
+    :param x: input batch
+    :param y: output batch
+    """
+
+    def __init__(
+        self, x: torch.Tensor, y: torch.Tensor,
+    ):
+        self.x = x
+        self.y = y
+
+        assert len(self.x) == len(self.y)
+
+    def feed(self, net, **kwargs) -> SimpleNamespace:
+        """Feed the batch to the network's `relax` method.
+
+        :param net: network to feed the batch to
+        :param **kwargs: additional arguments to pass to `net.relax()`
+        :return: namespace containing the batch's `x` and `y`, as well as the output
+        from `net.relax()`, in `fast`.
+        """
+        # run fast dynamics
+        res = net.relax(self.x, self.y, **kwargs)
+        ns = SimpleNamespace(x=self.x, y=self.y, fast=res)
+
+        return ns
+
+    def __len__(self) -> int:
+        """Number of samples in batch."""
+        return len(self.x)
+
+
 class _BatchReporter:
     """Object used to implement the `report` framework for `TrainerBatch`."""
 
-    def __init__(self, batch: "TrainerBatch"):
+    def __init__(self, batch: "TrainingBatch"):
         self._batch = batch
         self._tracker = self._batch.tracker
 
@@ -34,7 +71,7 @@ class _BatchReporter:
         sample_idx = self._batch.sample_idx
 
         if kwargs.pop("check_nan", False):
-            nan_action = self._batch._iterator.trainer.nan_action
+            nan_action = self._batch.trainer.nan_action
 
             if nan_action != "none":
                 value = args[1]
@@ -67,24 +104,17 @@ class _BatchReporter:
         target_dict = getattr(self._tracker.history, name)
         n = len(target_dict["batch"][-1])
 
-        report(
-            "sample",
-            self._batch.idx,
-            sample_idx + torch.arange(n),
-            meld=True,
-            overwrite=True,
-        )
+        report("sample", idx, sample_idx + torch.arange(n), meld=True, overwrite=True)
 
 
-class TrainerBatch:
-    """Handle for one training or evaluation batch.
+class TrainingBatch:
+    """Handle for one training batch.
     
-    This helps train or evaluate a network and can also be used to monitor tensor values
-    during the training or evaluation.
+    This helps train a network and can also be used to monitor tensor values.
 
-    The monitoring facility is used by employing the `report` construction; e.g.,
+    The monitoring facility is used by employing the `report` construct; e.g.,
         batch.report.weight("W", net.W[0])
-    reports the networks first `W` tensor inside the `weight` namespace under the name
+    reports the network's first `W` tensor inside the `weight` namespace under the name
     `"W"`. `batch.report` automatically assigns `batch` index and `sample` index to the
     reported value.
 
@@ -99,13 +129,9 @@ class TrainerBatch:
     Attributes:
     :param x: input batch
     :param y: output batch
-    :param idx: training batch index -- note that this will refer to the associated
-        training batch even if `self` is an evaluation batch
-    :param sample_idx: training sample index for the start of the batch -- note that
-        this will refer to the associated training batch even if `self` is an evaluation
-        batch
-    :param n: total number of training batches
-    :param training: whether this is a training or evaluation batch.
+    :param idx: batch index
+    :param sample_idx: sample index for the start of the batch
+    :param n: total number of training batches in the run
     :param tracker: object used for monitoring values
     :param report: tool used to monitor values
     """
@@ -117,9 +143,7 @@ class TrainerBatch:
         idx: int,
         n: int,
         sample_idx: int,
-        training: bool,
-        tracker: "Tracker",
-        iterator: "_TrainerIterator",
+        iterator: "TrainingIterable",
     ):
         self.x = x
         self.y = y
@@ -129,8 +153,9 @@ class TrainerBatch:
         self.idx = idx
         self.n = n
         self.sample_idx = sample_idx
-        self.training = training
-        self.tracker = tracker
+
+        self.trainer = iterator.trainer
+        self.tracker = self.trainer.tracker
         self.report = _BatchReporter(self)
 
         self._iterator = iterator
@@ -148,9 +173,8 @@ class TrainerBatch:
         res = net.relax(self.x, self.y, **kwargs)
         ns = SimpleNamespace(x=self.x, y=self.y, fast=res)
 
-        if self.training:
-            # calculate gradients
-            net.calculate_weight_grad(ns.fast)
+        # calculate gradients
+        net.calculate_weight_grad(ns.fast)
 
         return ns
 
@@ -185,97 +209,119 @@ class TrainerBatch:
         if divergence_error:
             self._iterator.divergence = True
 
+    def evaluate(self, val_loader: Iterable) -> "EvaluationIterable":
+        """Generate an iterable through a validation set.
+        
+        See `EvaluationIterable`.
+        """
+        return EvaluationIterable(self.trainer, val_loader)
+
     def __len__(self) -> int:
         """Number of samples in batch."""
         return len(self.x)
 
 
-class _TrainerIterator:
-    """Iterator used by Trainer."""
-
-    def __init__(self, iterable: "TrainerIterable"):
-        self.iterable = iterable
-        self.trainer = self.iterable.trainer
-        self.loader = self.iterable.loader
-        self.n_batches = self.iterable.n_batches
-        self.training = self.iterable.training
-
-        self.tracker = self.trainer.tracker
-
-        self.i = 0
-        self.sample = 0
-        self.it = iter(self.loader)
-
-        self.terminating = False
-        self.divergence = False
-
-    def __next__(self) -> TrainerBatch:
-        if self.i < self.n_batches and not self.terminating:
-            try:
-                x, y = next(self.it)
-            except StopIteration:
-                self.it = iter(self.loader)
-                x, y = next(self.it)
-
-            batch = TrainerBatch(
-                x=x,
-                y=y,
-                idx=self.i,
-                n=self.n_batches,
-                sample_idx=self.sample,
-                training=self.training,
-                tracker=self.tracker,
-                iterator=self,
-            )
-            self.i += 1
-            self.sample += len(batch)
-
-            return batch
-        else:
-            # ensure tracker coalesces history at the end of the iteration
-            if self.training:
-                # ...but only if it is the end of the *training* run!
-                self.tracker.finalize()
-
-                if self.divergence:
-                    raise DivergenceError(
-                        f"divergence at batch {self.i}, sample {self.sample}"
-                    )
-            raise StopIteration
-
-
-class TrainerIterable:
-    """Iterable returned by calling a Trainer.
+class TrainingIterable:
+    """Iterable returned by calling a Trainer, as well as corresponding iterator.
     
-    Iterating through this yields `TrainerBatch`es. At the end of iteration, the
+    Iterating through this yields `TrainingBatch`es. At the end of iteration, the
     `Trainer`'s `Tracker`'s `finalize` method is called to prepare the results for easy
     access.
     """
 
-    def __init__(
-        self,
-        trainer: "Trainer",
-        n_batches: int,
-        loader: Optional[Iterable] = None,
-        training: bool = True,
-    ):
+    def __init__(self, trainer: "Trainer", n_batches: int):
         self.trainer = trainer
         self.n_batches = n_batches
-        self.loader = self.trainer.loader if loader is None else loader
-        self.training = training
 
-    def __iter__(self) -> _TrainerIterator:
-        return _TrainerIterator(self)
+        self.loader = self.trainer.loader
+
+        self.terminating = False
+        self.divergence = False
+
+        self._it = None
+        self._i = 0
+        self._sample = 0
+
+    def __iter__(self) -> "TrainingIterable":
+        self.terminating = False
+        self.divergence = False
+
+        self._i = 0
+        self._sample = 0
+        self._it = iter(self.loader)
+        return self
+
+    def __next__(self) -> TrainingBatch:
+        if self._i < self.n_batches and not self.terminating:
+            try:
+                x, y = next(self._it)
+            except StopIteration:
+                self._it = iter(self.loader)
+                x, y = next(self._it)
+
+            batch = TrainingBatch(
+                x=x,
+                y=y,
+                idx=self._i,
+                n=self.n_batches,
+                sample_idx=self._sample,
+                iterator=self,
+            )
+            self._i += 1
+            self._sample += len(batch)
+
+            return batch
+        else:
+            # ensure tracker coalesces history at the end of the iteration
+            self.trainer.tracker.finalize()
+
+            if self.divergence:
+                raise DivergenceError(
+                    f"divergence at batch {self._i}, sample {self._sample}"
+                )
+            raise StopIteration
 
     def __len__(self) -> int:
         return self.n_batches
 
 
-class TrainerEvaluateIterable(TrainerIterable):
-    """Iterable for running a validation run."""
+class EvaluationIterable:
+    """Iterable and corresponding iterator used for evaluation runs.
+    
+    Iterating through this yields `EvaluationBatch`es.
+    
+    Can be used as:
+        losses = []
+        for val_batch in eval_iterable:
+            ns = val_batch.feed(net)
+            losses.append(net.pc_loss(val_batch.ns))
+
+    More commonly this is used as part of a training run,
+        trainer = Trainer(train_loader)
+        for batch in trainer(n_batches):
+            batch.feed()
+            for val_batch in batch.evaluate(val_loader):
+                ns = val_batch.feed(net)
+                batch.report.latent("z", ns.z)
+            
+            optimizer.step()
+    
+    The validation run can also be run in a single line:
+        eval_iterable.run(val_loader)
+    """
 
     def __init__(self, trainer: "Trainer", loader: Iterable):
-        super().__init__(trainer, len(loader), training=False, loader=loader)
+        self.trainer = trainer
+        self.loader = loader
+        self._it = None
+
+    def __iter__(self) -> "EvaluationIterable":
+        self._it = iter(self.loader)
+        return self
+
+    def __next__(self) -> Batch:
+        x, y = next(self._it)
+        return Batch(x=x, y=y)
 
     def run(self, net):
         """Run a full validation run.
@@ -286,6 +332,9 @@ class TrainerEvaluateIterable(TrainerIterable):
         """
         for batch in self:
             batch.feed(net)
+
+    def __len__(self) -> int:
+        return len(self.loader)
 
 
 class Trainer:
@@ -319,12 +368,9 @@ class Trainer:
         self.history = self.tracker.history
         self.nan_action = "none"
 
-    def __call__(self, n_batches: int) -> TrainerIterable:
-        return TrainerIterable(self, n_batches)
+    def __call__(self, n_batches: int) -> TrainingIterable:
+        return TrainingIterable(self, n_batches)
 
     def __len__(self) -> int:
         """Trainer length equals the length of the loader."""
         return len(self.loader)
-
-    def evaluate(self, val_loader: Iterable) -> TrainerEvaluateIterable:
-        return TrainerEvaluateIterable(self, val_loader)
