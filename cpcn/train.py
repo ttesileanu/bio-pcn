@@ -107,7 +107,7 @@ class _BatchReporter:
         report("sample", idx, sample_idx + torch.arange(n), meld=True, overwrite=True)
 
 
-class TrainingBatch:
+class TrainingBatch(Batch):
     """Handle for one training batch.
     
     This helps train a network and can also be used to monitor tensor values.
@@ -145,10 +145,7 @@ class TrainingBatch:
         sample_idx: int,
         iterator: "TrainingIterable",
     ):
-        self.x = x
-        self.y = y
-
-        assert len(self.x) == len(self.y)
+        super().__init__(x, y)
 
         self.idx = idx
         self.n = n
@@ -169,9 +166,7 @@ class TrainingBatch:
         :return: namespace containing the batch's `x` and `y`, as well as the output
         from `net.relax()`, in `fast`.
         """
-        # run fast dynamics
-        res = net.relax(self.x, self.y, **kwargs)
-        ns = SimpleNamespace(x=self.x, y=self.y, fast=res)
+        ns = super().feed(net, **kwargs)
 
         # calculate gradients
         net.calculate_weight_grad(ns.fast)
@@ -215,10 +210,6 @@ class TrainingBatch:
         See `EvaluationIterable`.
         """
         return EvaluationIterable(self.trainer, val_loader)
-
-    def __len__(self) -> int:
-        """Number of samples in batch."""
-        return len(self.x)
 
 
 class TrainingIterable:
