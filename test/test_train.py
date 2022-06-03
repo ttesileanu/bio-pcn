@@ -406,3 +406,10 @@ def test_report_check_invalid_stops_if_nan_action_is_stop_or_warn_stop(
         batch.report.test("foo", np.nan, check_invalid=True)
 
     assert count == 1
+
+
+def test_trainer_nan_action_in_constructor():
+    trainer = Trainer(generate_loader(), nan_action="raise")
+    with pytest.raises(DivergenceError):
+        for batch in trainer(2):
+            batch.report.test("foo", np.nan, check_invalid=True)

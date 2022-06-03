@@ -356,7 +356,7 @@ class Trainer:
         self.loader = loader
         self.tracker = Tracker(index_name="batch")
         self.history = self.tracker.history
-        self.nan_action = "none"
+        self.nan_action = nan_action
 
     def __call__(self, n_batches: int) -> TrainingIterable:
         return TrainingIterable(self, n_batches)
