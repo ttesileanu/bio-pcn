@@ -71,9 +71,9 @@ class _BatchReporter:
         sample_idx = self._batch.sample_idx
 
         if kwargs.pop("check_invalid", False):
-            nan_action = self._batch.trainer.nan_action
+            invalid_action = self._batch.trainer.invalid_action
 
-            if nan_action != "none":
+            if invalid_action != "none":
                 value = args[1]
                 valid = True
                 if torch.is_tensor(value):
@@ -92,9 +92,11 @@ class _BatchReporter:
                     valid = np.all(np.isfinite(value))
 
                 if not valid:
-                    if nan_action in ["stop", "raise", "warn+stop"]:
-                        self._batch.terminate(divergence_error=nan_action == "raise")
-                    if nan_action in ["warn", "warn+stop"]:
+                    if invalid_action in ["stop", "raise", "warn+stop"]:
+                        self._batch.terminate(
+                            divergence_error=invalid_action == "raise"
+                        )
+                    if invalid_action in ["warn", "warn+stop"]:
                         msg = f"divergence at batch {idx}, sample {sample_idx}"
                         warnings.warn(msg, DivergenceWarning)
 
@@ -342,11 +344,11 @@ class Trainer:
     :param history: reference to the tracker's history namespace
     """
 
-    def __init__(self, loader: Iterable, nan_action: str = "none"):
+    def __init__(self, loader: Iterable, invalid_action: str = "none"):
         """Initialize trainer.
         
         :param loader: iterable of `(input, output)` tuples
-        :param nan_action: action to take in case a check for invalid values fails:
+        :param invalid_action: action to take in case a check for invalid values fails:
             "none":         do nothing
             "stop":         stop run silently
             "warn":         print a warning and continue
@@ -356,7 +358,7 @@ class Trainer:
         self.loader = loader
         self.tracker = Tracker(index_name="batch")
         self.history = self.tracker.history
-        self.nan_action = nan_action
+        self.invalid_action = invalid_action
 
     def __call__(self, n_batches: int) -> TrainingIterable:
         return TrainingIterable(self, n_batches)

@@ -330,7 +330,7 @@ def test_batch_terminate_only_terminates_at_the_end_of_the_for_loop(trainer):
 def test_report_with_check_invalid(trainer, value):
     k = 3
     count = 0
-    trainer.nan_action = "stop"
+    trainer.invalid_action = "stop"
     if torch.is_tensor(value):
         normal = torch.ones_like(value)
     elif hasattr(value, "__len__"):
@@ -350,14 +350,14 @@ def test_report_with_check_invalid(trainer, value):
     assert count == k + 1
 
 
-def test_report_check_invalid_raises_if_nan_action_is_raise(trainer):
-    trainer.nan_action = "raise"
+def test_report_check_invalid_raises_if_invalid_action_is_raise(trainer):
+    trainer.invalid_action = "raise"
     with pytest.raises(DivergenceError):
         for batch in trainer(2):
             batch.report.test("foo", np.nan, check_invalid=True)
 
 
-def test_default_nan_action_is_none(trainer):
+def test_default_invalid_action_is_none(trainer):
     count = 0
     n = 3
     for batch in trainer(n):
@@ -374,19 +374,19 @@ def test_batch_terminate_divergence_error_raises(trainer):
 
 
 @pytest.mark.parametrize("warn_type", ["warn", "warn+stop"])
-def test_report_check_invalid_warns_if_nan_action_is_warn_or_warn_stop(
+def test_report_check_invalid_warns_if_invalid_action_is_warn_or_warn_stop(
     trainer, warn_type
 ):
-    trainer.nan_action = warn_type
+    trainer.invalid_action = warn_type
     with pytest.warns(DivergenceWarning):
         for batch in trainer(2):
             batch.report.test("foo", np.nan, check_invalid=True)
 
 
-def test_report_check_invalid_does_not_stop_if_nan_action_is_warn(trainer):
+def test_report_check_invalid_does_not_stop_if_invalid_action_is_warn(trainer):
     count = 0
     n = 3
-    trainer.nan_action = "warn"
+    trainer.invalid_action = "warn"
     with pytest.warns(DivergenceWarning):
         for batch in trainer(n):
             count += 1
@@ -396,11 +396,11 @@ def test_report_check_invalid_does_not_stop_if_nan_action_is_warn(trainer):
 
 
 @pytest.mark.parametrize("warn_type", ["stop", "warn+stop"])
-def test_report_check_invalid_stops_if_nan_action_is_stop_or_warn_stop(
+def test_report_check_invalid_stops_if_invalid_action_is_stop_or_warn_stop(
     trainer, warn_type
 ):
     count = 0
-    trainer.nan_action = warn_type
+    trainer.invalid_action = warn_type
     for batch in trainer(3):
         count += 1
         batch.report.test("foo", np.nan, check_invalid=True)
@@ -408,8 +408,8 @@ def test_report_check_invalid_stops_if_nan_action_is_stop_or_warn_stop(
     assert count == 1
 
 
-def test_trainer_nan_action_in_constructor():
-    trainer = Trainer(generate_loader(), nan_action="raise")
+def test_trainer_invalid_action_in_constructor():
+    trainer = Trainer(generate_loader(), invalid_action="raise")
     with pytest.raises(DivergenceError):
         for batch in trainer(2):
             batch.report.test("foo", np.nan, check_invalid=True)
