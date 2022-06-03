@@ -70,7 +70,7 @@ class _BatchReporter:
         idx = self._batch.idx
         sample_idx = self._batch.sample_idx
 
-        if kwargs.pop("check_nan", False):
+        if kwargs.pop("check_invalid", False):
             nan_action = self._batch.trainer.nan_action
 
             if nan_action != "none":
@@ -119,12 +119,11 @@ class TrainingBatch(Batch):
     reported value.
 
     A check for invalid values can be done automatically like this:
-        batch.report.score("L", some_loss(net), check_nan=True)
-    Note that despite the name, this checks for either `nan`s or infinities in the
-    values that are reported. If such an invalid value is found, `batch.terminate()` is
-    called so that the iteration ends on the next step. Depending on the trainer
-    settings, the termination can either be silent, or it can be accompanied by a
-    warning or an exception. See `Trainer`.
+        batch.report.score("L", some_loss(net), check_invalid=True)
+    Invalid value here means either `nan`s or infinity. If such an invalid value is
+    found, `batch.terminate()` is called so that the iteration ends on the next step.
+    Depending on the trainer settings, the termination can either be silent, or it can
+    be accompanied by a warning or an exception. See `Trainer`.
 
     Attributes:
     :param x: input batch
