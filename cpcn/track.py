@@ -4,7 +4,41 @@
 import torch
 
 from types import SimpleNamespace
-from typing import Union, Iterable
+from typing import Union, Iterable, Callable
+
+
+def _dispatch_values(
+    reporter: Callable,
+    name: str,
+    field: Union[str, dict],
+    idx: int,
+    value: Union[None, int, float, Iterable, torch.Tensor] = None,
+    **kwargs,
+):
+    """Pass values to a reporter, handling lists or tensors, as well as dicts for
+    multi-parameter reports.
+    """
+    if not isinstance(field, str):
+        if value is not None:
+            raise ValueError("Tracker: value used with multi-parameter report")
+
+        for crt_key, crt_value in field.items():
+            reporter(name, crt_key, idx, crt_value, **kwargs)
+        return
+
+    if not torch.is_tensor(value):
+        if isinstance(value, int):
+            value = torch.LongTensor([value])
+        elif hasattr(value, "__iter__"):
+            for i, sub_value in enumerate(value):
+                reporter(name, f"{field}:{i}", idx, sub_value, **kwargs)
+            return
+        else:
+            value = torch.FloatTensor([value])
+    else:
+        value = value.detach().cpu().clone()
+
+    reporter(name, field, idx, value, **kwargs)
 
 
 class _Reporter:
@@ -26,7 +60,10 @@ class _Reporter:
         if not hasattr(self._tracker.history, name):
             setattr(self._tracker.history, name, {})
             self._last_idx[name] = None
-        return lambda *args, name=name, **kwargs: self._report(name, *args, **kwargs)
+        reporter = self._report
+        return lambda *args, name=name, reporter=reporter, **kwargs: _dispatch_values(
+            reporter, name, *args, **kwargs
+        )
 
     def _report(
         self,
@@ -37,36 +74,8 @@ class _Reporter:
         meld: bool = False,
         overwrite: bool = False,
     ):
-        if not isinstance(field, str):
-            if value is not None:
-                raise ValueError("Tracker: value used with multi-parameter report")
-
-            for crt_key, crt_value in field.items():
-                self._report(
-                    name, crt_key, idx, crt_value, meld=meld, overwrite=overwrite
-                )
-            return
-
-        if not torch.is_tensor(value):
-            if isinstance(value, int):
-                value = torch.LongTensor([value])
-            elif hasattr(value, "__iter__"):
-                for i, sub_value in enumerate(value):
-                    self._report(
-                        name,
-                        f"{field}:{i}",
-                        idx,
-                        sub_value,
-                        meld=meld,
-                        overwrite=overwrite,
-                    )
-                return
-            else:
-                value = torch.FloatTensor([value])
-        else:
-            value = value.detach().cpu().clone()
-            if not meld:
-                value.unsqueeze_(0)
+        if not meld:
+            value.unsqueeze_(0)
 
         index_name = self._tracker.index_name
         target = getattr(self._tracker.history, name)
