@@ -10,7 +10,6 @@ from typing import Union, Iterable, Callable
 def _dispatch_values(
     reporter: Callable,
     field: Union[str, dict],
-    idx: int,
     value: Union[None, int, float, Iterable, torch.Tensor] = None,
     **kwargs,
 ):
@@ -22,7 +21,7 @@ def _dispatch_values(
             raise ValueError("Tracker: value used with multi-parameter report")
 
         for crt_key, crt_value in field.items():
-            reporter(crt_key, idx, crt_value, **kwargs)
+            reporter(crt_key, crt_value, **kwargs)
         return
 
     if not torch.is_tensor(value):
@@ -30,14 +29,14 @@ def _dispatch_values(
             value = torch.LongTensor([value])
         elif hasattr(value, "__iter__"):
             for i, sub_value in enumerate(value):
-                reporter(f"{field}:{i}", idx, sub_value, **kwargs)
+                reporter(f"{field}:{i}", sub_value, **kwargs)
             return
         else:
             value = torch.FloatTensor([value])
     else:
         value = value.detach().cpu().clone()
 
-    reporter(field, idx, value, **kwargs)
+    reporter(field, value, **kwargs)
 
 
 class _Reporter:
@@ -52,19 +51,39 @@ class _Reporter:
         self.tracker = tracker
         self.name = name
 
-    def report(self, *args, **kwargs):
+    def report(self, idx: int, *args, **kwargs):
         """Report one or multiple values, layered or not, with melding or not."""
-        if self.tracker.finalized:
-            raise ValueError("Tracker: attempt to report after finalize")
-        _dispatch_values(self._report, *args, **kwargs)
+        # make a history field, if it does not exist
+        if not hasattr(self.tracker.history, self.name):
+            setattr(self.tracker.history, self.name, {})
+        _dispatch_values(self._report, *args, idx=idx, **kwargs)
+
+    def accumulate(self, *args, **kwargs):
+        """Accumulate one or multiple values, layered or not."""
+        # make an accumulator field, if it does not exist
+        if not hasattr(self.tracker._accumulator, self.name):
+            setattr(self.tracker._accumulator, self.name, {})
+        _dispatch_values(self._accumulate, *args, **kwargs)
+
+    def report_accumulated(self, idx: int):
+        """Average all accumulated values, report them, and clear up accumulator."""
+        accumulator = getattr(self.tracker._accumulator, self.name)
+        if not hasattr(self.tracker.history, self.name):
+            setattr(self.tracker.history, self.name, {})
+        for field, values in accumulator.items():
+            mean_value = torch.cat(values).mean(dim=0)
+            self._report(field, mean_value, idx=idx)
+
+        accumulator.clear()
 
     def _report(
         self,
         field: Union[str, dict],
-        idx: int,
         value: Union[None, int, float, Iterable, torch.Tensor] = None,
+        idx: int = None,
         meld: bool = False,
     ):
+        assert idx is not None
         if not meld:
             value.unsqueeze_(0)
 
@@ -92,6 +111,17 @@ class _Reporter:
 
         # add new history entry
         target[field].append(value)
+
+    def _accumulate(
+        self,
+        field: Union[str, dict],
+        value: Union[None, int, float, Iterable, torch.Tensor] = None,
+    ):
+        target = getattr(self.tracker._accumulator, self.name)
+        if field not in target:
+            target[field] = []
+
+        target[field].append(value.unsqueeze(0))
 
 
 class Tracker:
@@ -133,6 +163,15 @@ class Tracker:
     entries as the length of the tensors. The constraint here is that, if we store more
     than one field per namespace, all have to have the same batch size.
 
+    Finally, you can accumulate values and then report a summary of the accumulated
+    values using the following syntax:
+        tracker.name.accumulate(field, value1)
+        ...
+        tracker.name.accumulate(field, valueN)
+        tracker.name.report_accumulated(idx)
+    The values `value1`, ..., `valueN` are averaged together and the mean is reported
+    and associated to the given index, `idx`.
+
     Attributes:
     :param index_name: name used for the index field
     :param history: namespace holding reported values
@@ -147,6 +186,7 @@ class Tracker:
         self.index_name = index_name
         self.finalized = False
         self.history = SimpleNamespace()
+        self._accumulator = SimpleNamespace()
 
     def finalize(self):
         """Finalize recording, coalesce history into coherent tensors."""
@@ -182,8 +222,4 @@ class Tracker:
         if self.finalized:
             return getattr(self.history, name)
         else:
-            # make a history field, if it does not exist
-            if not hasattr(self.history, name):
-                setattr(self.history, name, {})
-
             return _Reporter(self, name)
