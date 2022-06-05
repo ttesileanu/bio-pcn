@@ -9,7 +9,6 @@ from typing import Union, Iterable, Callable
 
 def _dispatch_values(
     reporter: Callable,
-    name: str,
     field: Union[str, dict],
     idx: int,
     value: Union[None, int, float, Iterable, torch.Tensor] = None,
@@ -23,7 +22,7 @@ def _dispatch_values(
             raise ValueError("Tracker: value used with multi-parameter report")
 
         for crt_key, crt_value in field.items():
-            reporter(name, crt_key, idx, crt_value, **kwargs)
+            reporter(crt_key, idx, crt_value, **kwargs)
         return
 
     if not torch.is_tensor(value):
@@ -31,41 +30,36 @@ def _dispatch_values(
             value = torch.LongTensor([value])
         elif hasattr(value, "__iter__"):
             for i, sub_value in enumerate(value):
-                reporter(name, f"{field}:{i}", idx, sub_value, **kwargs)
+                reporter(f"{field}:{i}", idx, sub_value, **kwargs)
             return
         else:
             value = torch.FloatTensor([value])
     else:
         value = value.detach().cpu().clone()
 
-    reporter(name, field, idx, value, **kwargs)
+    reporter(field, idx, value, **kwargs)
 
 
 class _Reporter:
     """Helper for Tracker, used to report new values."""
 
-    def __init__(self, tracker: "Tracker"):
+    def __init__(self, tracker: "Tracker", name: str):
         """Construct the reporter.
         
         :param tracker: associated tracker object
+        :param name: dictionary that this refers to
         """
-        self._tracker = tracker
+        self.tracker = tracker
+        self.name = name
 
-    def __getattr__(self, name: str):
-        if self._tracker.finalized:
+    def report(self, *args, **kwargs):
+        """Report one or multiple values, layered or not, with melding or not."""
+        if self.tracker.finalized:
             raise ValueError("Tracker: attempt to report after finalize")
-
-        # make a history field, if it does not exist
-        if not hasattr(self._tracker.history, name):
-            setattr(self._tracker.history, name, {})
-        reporter = self._report
-        return lambda *args, name=name, reporter=reporter, **kwargs: _dispatch_values(
-            reporter, name, *args, **kwargs
-        )
+        _dispatch_values(self._report, *args, **kwargs)
 
     def _report(
         self,
-        name: str,
         field: Union[str, dict],
         idx: int,
         value: Union[None, int, float, Iterable, torch.Tensor] = None,
@@ -74,8 +68,8 @@ class _Reporter:
         if not meld:
             value.unsqueeze_(0)
 
-        index_name = self._tracker.index_name
-        target = getattr(self._tracker.history, name)
+        index_name = self.tracker.index_name
+        target = getattr(self.tracker.history, self.name)
         for key in [index_name, field]:
             if key not in target:
                 target[key] = []
@@ -84,9 +78,7 @@ class _Reporter:
 
         # try to make sure we don't have mismatched entries
         if len(target[field]) not in [len(idxs), len(idxs) - 1]:
-            raise IndexError(
-                "Tracker: mismatch in number of reports for different fields"
-            )
+            raise IndexError(f"Tracker: mismatched number of reports in {self.name}")
 
         crt_idxs = torch.LongTensor(len(value) * [idx])
         if len(target[field]) == len(idxs):
@@ -96,9 +88,7 @@ class _Reporter:
             # the index entry was already added
             # make sure the index is compatible with what we had before
             if len(crt_idxs) != len(idxs[-1]) or torch.any(crt_idxs != idxs[-1]):
-                raise IndexError(
-                    "Tracke: mismatch in index reported for different fields"
-                )
+                raise IndexError(f"Tracke: mismatched index values in {self.name}")
 
         # add new history entry
         target[field].append(value)
@@ -108,30 +98,45 @@ class Tracker:
     """Tracker for tensor and list-of-tensor values.
     
     Call as
-        tracker.report.test("field", idx, value)
-    to add an entry in the `"field"` field of the `test` dictionary in the `history`.
-    This adds the `value` to the `"field"`, and the given `idx` to the `"idx"` field
-    inside `tracker.history.test`.
+        tracker.test.report("field", idx, value)
+    to report an entry in the `"field"` field of the `test` dictionary. The reported
+    values can be accessed after `tracker.finalize()` is called, simply by indexing the
+    appropriate namespace:
+        tracker.test["field"]
+    The same values are also available in the `self.history` namespace.
+
+    The `report` function adds the `value` to the `"field"`, and makes sure a
+    corresponding index `idx` is present in`tracker.test["idx"]`. If there is a value
+    present in the `"idx"` field at the right location but it has the wrong value, an
+    `IndexError` is raised.
+
+    Dictionary names can be any valid Python variable name, except for those that are
+    already attributes or methods of `Tracker`; see below.
 
     If `value` is a `Tensor`, it is added as-is. If it is an iterable other than
-    `Tensor`, it is considered "layered" variable. An entry is recorded for each of its
-    elements, with field name generated by adding `":{layer}"` to `"field"`. Note that
-    therefore there is a big difference in behavior between reporting the 2d tensor
+    `Tensor`, it is considered a "layered" variable. An entry is recorded for each of
+    its elements, with field name generated by adding `":{layer}"` to `"field"`. Note
+    that therefore there is a big difference in behavior between reporting the 2d tensor
         torch.FloatTensor([[1.0, 2.0, 3.0]])
-    and reporting the list of tensors
-        [torch.FloatTensor([1.0]), torch.FloatTensor([2.0]), torch.FloatTensor([3.0])] .
+    and reporting the list with one tensor entry
+        [torch.FloatTensor([1.0, 2.0, 3.0])] .
 
     Multiple values can be recorded at once by using a `dict` for the first argument:
-        tracker.report.test({"foo": 2, "bar": 3}, idx=1)
+        tracker.test.report({"foo": 2, "bar": 3}, idx=1)
 
     There is a way to submit several entries for the same index, which can be useful if
     we wish to, e.g., store a batch of results. This can be achieved by using the `meld`
     argument to `report`:
-        tracker.report.test("field", idx, value, meld=True)
+        tracker.test.report("field", idx, value, meld=True)
     If `value` is a tensor, a new entry is generated for each row in `value`. If it is a
     different iterable, then the same is done *per layer*. This will generate as many
     entries as the length of the tensors. The constraint here is that, if we store more
     than one field per namespace, all have to have the same batch size.
+
+    Attributes:
+    :param index_name: name used for the index field
+    :param history: namespace holding reported values
+    :param finalized: indicator whether `self.finalize()` was called
     """
 
     def __init__(self, index_name: str = "idx"):
@@ -140,26 +145,16 @@ class Tracker:
         :param index_name: name of the index field
         """
         self.index_name = index_name
-        self.history = SimpleNamespace()
         self.finalized = False
-        self.report = _Reporter(self)
+        self.history = SimpleNamespace()
 
     def finalize(self):
         """Finalize recording, coalesce history into coherent tensors."""
         for field in self.history.__dict__:
             target = getattr(self.history, field)
 
+            # coalesce
             for key in target:
-                # go through, find and process repeated entries
-                if key != self.index_name:
-                    for i, value in enumerate(target[key]):
-                        if not torch.is_tensor(value):
-                            sum = 0
-                            for x in value:
-                                sum = sum + x
-                            target[key][i] = sum / len(value)
-
-                # coalesce
                 target[key] = torch.cat(target[key])
 
         self.finalized = True
@@ -182,3 +177,13 @@ class Tracker:
         s += hist + ")"
 
         return s
+
+    def __getattr__(self, name: str):
+        if self.finalized:
+            return getattr(self.history, name)
+        else:
+            # make a history field, if it does not exist
+            if not hasattr(self.history, name):
+                setattr(self.history, name, {})
+
+            return _Reporter(self, name)
