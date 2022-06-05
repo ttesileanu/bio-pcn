@@ -50,7 +50,6 @@ class _Reporter:
         :param tracker: associated tracker object
         """
         self._tracker = tracker
-        self._last_idx = {}
 
     def __getattr__(self, name: str):
         if self._tracker.finalized:
@@ -59,7 +58,6 @@ class _Reporter:
         # make a history field, if it does not exist
         if not hasattr(self._tracker.history, name):
             setattr(self._tracker.history, name, {})
-            self._last_idx[name] = None
         reporter = self._report
         return lambda *args, name=name, reporter=reporter, **kwargs: _dispatch_values(
             reporter, name, *args, **kwargs
@@ -72,7 +70,6 @@ class _Reporter:
         idx: int,
         value: Union[None, int, float, Iterable, torch.Tensor] = None,
         meld: bool = False,
-        overwrite: bool = False,
     ):
         if not meld:
             value.unsqueeze_(0)
@@ -86,38 +83,25 @@ class _Reporter:
         idxs = target[index_name]
 
         # try to make sure we don't have mismatched entries
-        assert len(target[field]) == len(idxs) or len(target[field]) == len(idxs) - 1
+        if len(target[field]) not in [len(idxs), len(idxs) - 1]:
+            raise IndexError(
+                "Tracker: mismatch in number of reports for different fields"
+            )
 
-        last_idx = self._last_idx[name]
-        if last_idx is None or last_idx != idx:
-            # simply add new entry
-            idxs.append(torch.LongTensor(len(value) * [idx]))
-            target[field].append(value)
+        crt_idxs = torch.LongTensor(len(value) * [idx])
+        if len(target[field]) == len(idxs):
+            # add new index entry
+            idxs.append(crt_idxs)
         else:
-            # no need to add another entry in index array...
-            # ...but did we already have an entry in this field?
-            if len(target[field]) < len(idxs):
-                # make sure the length of this value entry matches previous ones for the
-                # same index
-                if len(value) != len(idxs[-1]):
-                    raise ValueError("Tracker: mismatched batch size for meld == True")
-                # no; add the entry
-                target[field].append(value)
-            else:
-                if overwrite:
-                    target[field][-1] = value
-                else:
-                    if len(value) > 1:
-                        raise ValueError(
-                            "Tracker: repeated entry not allowed when meld == True"
-                        )
+            # the index entry was already added
+            # make sure the index is compatible with what we had before
+            if len(crt_idxs) != len(idxs[-1]) or torch.any(crt_idxs != idxs[-1]):
+                raise IndexError(
+                    "Tracke: mismatch in index reported for different fields"
+                )
 
-                    # yes: keep track of all the entries, to average over them later
-                    if torch.is_tensor(target[field][-1]):
-                        target[field][-1] = [target[field][-1]]
-                    target[field][-1].append(value)
-
-        self._last_idx[name] = idx
+        # add new history entry
+        target[field].append(value)
 
 
 class Tracker:
@@ -137,10 +121,6 @@ class Tracker:
     and reporting the list of tensors
         [torch.FloatTensor([1.0]), torch.FloatTensor([2.0]), torch.FloatTensor([3.0])] .
 
-    If several reports are made for the same variable at the same index, they are
-    combined by averaging in the `finalize` stage. Thus in general each index will
-    appear once.
-
     Multiple values can be recorded at once by using a `dict` for the first argument:
         tracker.report.test({"foo": 2, "bar": 3}, idx=1)
 
@@ -151,8 +131,7 @@ class Tracker:
     If `value` is a tensor, a new entry is generated for each row in `value`. If it is a
     different iterable, then the same is done *per layer*. This will generate as many
     entries as the length of the tensors. The constraint here is that, if we store more
-    than one field per namespace, all have to have the same batch size. Repeated entries
-    for the same index are not allowed when `meld == True`.
+    than one field per namespace, all have to have the same batch size.
     """
 
     def __init__(self, index_name: str = "idx"):
