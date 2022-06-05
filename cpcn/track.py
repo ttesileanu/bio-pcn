@@ -107,7 +107,7 @@ class _Reporter:
             # the index entry was already added
             # make sure the index is compatible with what we had before
             if len(crt_idxs) != len(idxs[-1]) or torch.any(crt_idxs != idxs[-1]):
-                raise IndexError(f"Tracke: mismatched index values in {self.name}")
+                raise IndexError(f"Tracker: mismatched index values in {self.name}")
 
         # add new history entry
         target[field].append(value)
@@ -128,7 +128,7 @@ class Tracker:
     """Tracker for tensor and list-of-tensor values.
     
     Call as
-        tracker.test.report("field", idx, value)
+        tracker.test.report(idx, "field", value)
     to report an entry in the `"field"` field of the `test` dictionary. The reported
     values can be accessed after `tracker.finalize()` is called, simply by indexing the
     appropriate namespace:
@@ -152,12 +152,12 @@ class Tracker:
         [torch.FloatTensor([1.0, 2.0, 3.0])] .
 
     Multiple values can be recorded at once by using a `dict` for the first argument:
-        tracker.test.report({"foo": 2, "bar": 3}, idx=1)
+        tracker.test.report(idx=1, {"foo": 2, "bar": 3})
 
     There is a way to submit several entries for the same index, which can be useful if
     we wish to, e.g., store a batch of results. This can be achieved by using the `meld`
     argument to `report`:
-        tracker.test.report("field", idx, value, meld=True)
+        tracker.test.report(idx, "field", value, meld=True)
     If `value` is a tensor, a new entry is generated for each row in `value`. If it is a
     different iterable, then the same is done *per layer*. This will generate as many
     entries as the length of the tensors. The constraint here is that, if we store more
