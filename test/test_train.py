@@ -36,6 +36,15 @@ def val_loader_one():
 
 
 @pytest.fixture
+def mock_net():
+    net = Mock()
+    net.relax.return_value = SimpleNamespace()
+    net.pc_loss.return_value = torch.tensor(0.0)
+
+    return net
+
+
+@pytest.fixture
 def trainer():
     trainer = Trainer(generate_loader())
     return trainer
@@ -84,51 +93,42 @@ def test_trainer_repeats_dataset_if_necessary(loader):
         assert torch.allclose(batch.y, y)
 
 
-def test_batch_feed_calls_net_relax(trainer):
-    net = Mock()
-    net.relax.return_value = SimpleNamespace()
+def test_batch_feed_calls_net_relax(trainer, mock_net):
     for batch in trainer(1):
-        batch.feed(net)
+        batch.feed(mock_net)
 
-    net.relax.assert_called_once()
+    mock_net.relax.assert_called_once()
 
 
-def test_batch_feed_calls_net_relax_with_x_and_y(trainer):
-    net = Mock()
-    net.relax.return_value = SimpleNamespace()
+def test_batch_feed_calls_net_relax_with_x_and_y(trainer, mock_net):
     for batch in trainer(1):
-        batch.feed(net)
+        batch.feed(mock_net)
 
-    net.relax.assert_called_once_with(batch.x, batch.y)
+    mock_net.relax.assert_called_once_with(batch.x, batch.y)
 
 
-def test_batch_feed_sends_other_kwargs_to_net_relax(trainer):
-    net = Mock()
-    net.relax.return_value = SimpleNamespace()
+def test_batch_feed_sends_other_kwargs_to_net_relax(trainer, mock_net):
     foo = 3.5
     for batch in trainer(1):
-        batch.feed(net, foo=foo)
+        batch.feed(mock_net, foo=foo)
 
-    net.relax.assert_called_once_with(batch.x, batch.y, foo=foo)
+    mock_net.relax.assert_called_once_with(batch.x, batch.y, foo=foo)
 
 
-def test_batch_feed_return_contains_results_from_relax_in_fast(trainer):
-    net = Mock()
+def test_batch_feed_return_contains_results_from_relax_in_fast(trainer, mock_net):
     ret_val = "test"
-    net.relax.return_value = ret_val
+    mock_net.relax.return_value = ret_val
     for batch in trainer(1):
-        ns = batch.feed(net)
+        ns = batch.feed(mock_net)
 
     assert ns.fast == ret_val
 
 
-def test_batch_feed_calls_calculate_weight_grad_with_fast(trainer):
-    net = Mock()
-    net.relax.return_value = SimpleNamespace()
+def test_batch_feed_calls_calculate_weight_grad_with_fast(trainer, mock_net):
     for batch in trainer(1):
-        ns = batch.feed(net)
+        ns = batch.feed(mock_net)
 
-    net.calculate_weight_grad.assert_called_once_with(ns.fast)
+    mock_net.calculate_weight_grad.assert_called_once_with(ns.fast)
 
 
 def test_batch_contains_batch_index(trainer):
@@ -161,69 +161,64 @@ def test_iterate_evaluate_goes_through_val_dataset(trainer, val_loader):
         assert torch.allclose(crt_batch.y, crt_y)
 
 
-def test_evaluate_batch_feed_calls_net_relax(trainer, val_loader_one):
-    net = Mock()
-    net.relax.return_value = SimpleNamespace()
+def test_evaluate_batch_feed_calls_net_relax(trainer, val_loader_one, mock_net):
     train_batch = next(iter(trainer(1)))
     for batch in train_batch.evaluate(val_loader_one):
-        batch.feed(net)
+        batch.feed(mock_net)
 
-    net.relax.assert_called_once()
+    mock_net.relax.assert_called_once()
 
 
-def test_evaluate_batch_feed_calls_net_relax_with_x_and_y(trainer, val_loader_one):
-    net = Mock()
-    net.relax.return_value = SimpleNamespace()
+def test_evaluate_batch_feed_calls_net_relax_with_x_and_y(
+    trainer, val_loader_one, mock_net
+):
     train_batch = next(iter(trainer(1)))
     for batch in train_batch.evaluate(val_loader_one):
-        batch.feed(net)
+        batch.feed(mock_net)
 
-    net.relax.assert_called_once_with(batch.x, batch.y)
+    mock_net.relax.assert_called_once_with(batch.x, batch.y)
 
 
-def test_evaluate_batch_feed_sends_other_kwargs_to_net_relax(trainer, val_loader_one):
-    net = Mock()
-    net.relax.return_value = SimpleNamespace()
+def test_evaluate_batch_feed_sends_other_kwargs_to_net_relax(
+    trainer, val_loader_one, mock_net
+):
     foo = 3.5
     train_batch = next(iter(trainer(1)))
     for batch in train_batch.evaluate(val_loader_one):
-        batch.feed(net, foo=foo)
+        batch.feed(mock_net, foo=foo)
 
-    net.relax.assert_called_once_with(batch.x, batch.y, foo=foo)
+    mock_net.relax.assert_called_once_with(batch.x, batch.y, foo=foo)
 
 
 def test_evaluate_batch_feed_return_contains_results_from_relax_in_fast(
-    trainer, val_loader_one
+    trainer, val_loader_one, mock_net
 ):
-    net = Mock()
     ret_val = "test"
-    net.relax.return_value = ret_val
+    mock_net.relax.return_value = ret_val
     train_batch = next(iter(trainer(1)))
     for batch in train_batch.evaluate(val_loader_one):
-        ns = batch.feed(net)
+        ns = batch.feed(mock_net)
 
     assert ns.fast == ret_val
 
 
 def test_evaluate_batch_feed_calls_does_not_call_calculate_weight_grad(
-    trainer, val_loader_one
+    trainer, val_loader_one, mock_net
 ):
-    net = Mock()
-    net.relax.return_value = SimpleNamespace()
     train_batch = next(iter(trainer(1)))
     for batch in train_batch.evaluate(val_loader_one):
-        batch.feed(net)
+        batch.feed(mock_net)
 
-    net.calculate_weight_grad.assert_not_called()
+    mock_net.calculate_weight_grad.assert_not_called()
 
 
-def test_evaluate_run_iterates_and_feeds_through_all_dataset(trainer, val_loader):
-    net = Mock()
-    net.relax.return_value = SimpleNamespace()
+def test_evaluate_run_iterates_and_feeds_through_all_dataset(
+    trainer, val_loader, mock_net
+):
     train_batch = next(iter(trainer(1)))
-    train_batch.evaluate(val_loader).run(net)
+    train_batch.evaluate(val_loader).run(mock_net)
 
-    assert net.relax.call_count == len(val_loader)
+    assert mock_net.relax.call_count == len(val_loader)
 
 
 def test_trainer_has_tracker(trainer):
@@ -239,18 +234,9 @@ def test_tracker_index_name_is_batch(trainer):
     assert trainer.tracker.index_name == "batch"
 
 
-def test_report_calls_tracker_report(trainer):
-    trainer = Trainer(generate_loader())
-    with patch.object(trainer.tracker, "report", wraps=trainer.tracker.report) as mock:
-        for batch in trainer(1):
-            batch.report.test("foo", 2.0)
-
-        mock.test.assert_called()
-
-
 def test_report_fills_in_batch(trainer):
     for batch in trainer(3):
-        batch.report.test("foo", 2.0)
+        batch.test.report("foo", 2.0)
 
     assert hasattr(trainer.history, "test")
     assert "batch" in trainer.history.test
@@ -260,7 +246,7 @@ def test_report_fills_in_batch(trainer):
 
 def test_report_fills_in_sample(trainer):
     for batch in trainer(3):
-        batch.report.test("foo", 2.0)
+        batch.test.report("foo", 2.0)
 
     assert len(trainer.history.test["sample"]) == 3
 
@@ -270,17 +256,16 @@ def test_report_fills_in_sample(trainer):
 
 def test_end_of_iteration_calls_tracker_finalized(trainer):
     for batch in trainer(2):
-        batch.report.test("foo", 1.0)
+        batch.test.report("foo", 1.0)
 
     assert trainer.tracker.finalized
 
 
-def test_end_of_evaluate_iteration_does_not_finalize_tracker(trainer, val_loader):
-    net = Mock()
-    net.relax.return_value = SimpleNamespace()
-
+def test_end_of_evaluate_iteration_does_not_finalize_tracker(
+    trainer, val_loader, mock_net
+):
     train_batch = next(iter(trainer(1)))
-    train_batch.evaluate(val_loader).run(net)
+    train_batch.evaluate(val_loader).run(mock_net)
 
     assert not trainer.tracker.finalized
 
@@ -343,9 +328,9 @@ def test_report_with_check_invalid(trainer, value):
     for batch in trainer(5):
         count += 1
         if batch.idx != k:
-            batch.report.test("foo", normal, check_invalid=True)
+            batch.test.report("foo", normal, check_invalid=True)
         else:
-            batch.report.test("foo", value, check_invalid=True)
+            batch.test.report("foo", value, check_invalid=True)
 
     assert count == k + 1
 
@@ -354,7 +339,7 @@ def test_report_check_invalid_raises_if_invalid_action_is_raise(trainer):
     trainer.invalid_action = "raise"
     with pytest.raises(DivergenceError):
         for batch in trainer(2):
-            batch.report.test("foo", np.nan, check_invalid=True)
+            batch.test.report("foo", np.nan, check_invalid=True)
 
 
 def test_default_invalid_action_is_none(trainer):
@@ -362,7 +347,7 @@ def test_default_invalid_action_is_none(trainer):
     n = 3
     for batch in trainer(n):
         count += 1
-        batch.report.test("foo", np.nan, check_invalid=True)
+        batch.test.report("foo", np.nan, check_invalid=True)
 
     assert count == n
 
@@ -380,7 +365,7 @@ def test_report_check_invalid_warns_if_invalid_action_is_warn_or_warn_stop(
     trainer.invalid_action = warn_type
     with pytest.warns(DivergenceWarning):
         for batch in trainer(2):
-            batch.report.test("foo", np.nan, check_invalid=True)
+            batch.test.report("foo", np.nan, check_invalid=True)
 
 
 def test_report_check_invalid_does_not_stop_if_invalid_action_is_warn(trainer):
@@ -390,7 +375,7 @@ def test_report_check_invalid_does_not_stop_if_invalid_action_is_warn(trainer):
     with pytest.warns(DivergenceWarning):
         for batch in trainer(n):
             count += 1
-            batch.report.test("foo", np.nan, check_invalid=True)
+            batch.test.report("foo", np.nan, check_invalid=True)
 
     assert count == n
 
@@ -403,7 +388,7 @@ def test_report_check_invalid_stops_if_invalid_action_is_stop_or_warn_stop(
     trainer.invalid_action = warn_type
     for batch in trainer(3):
         count += 1
-        batch.report.test("foo", np.nan, check_invalid=True)
+        batch.test.report("foo", np.nan, check_invalid=True)
 
     assert count == 1
 
@@ -412,4 +397,77 @@ def test_trainer_invalid_action_in_constructor():
     trainer = Trainer(generate_loader(), invalid_action="raise")
     with pytest.raises(DivergenceError):
         for batch in trainer(2):
-            batch.report.test("foo", np.nan, check_invalid=True)
+            batch.test.report("foo", np.nan, check_invalid=True)
+
+
+@pytest.mark.parametrize("name", ["all_train", "train", "validation"])
+def test_metric_history_namespaces_automatically_made(
+    trainer, name, val_loader, mock_net
+):
+    for batch in trainer(1):
+        batch.feed(mock_net)
+        batch.evaluate(val_loader).run(mock_net)
+
+    assert hasattr(trainer.history, name)
+
+
+@pytest.mark.parametrize("name", ["all_train", "train", "validation"])
+def test_pc_loss_metric_automatically_made(trainer, name, val_loader, mock_net):
+    for batch in trainer(1):
+        batch.feed(mock_net)
+        batch.evaluate(val_loader).run(mock_net)
+
+    assert "pc_loss" in getattr(trainer.history, name)
+
+
+def test_pc_loss_correctly_registered_in_all_train(trainer, mock_net):
+    losses = [3.5, 2.0, 1.2]
+    mock_net.pc_loss.side_effect = losses
+    for batch in trainer(len(losses)):
+        batch.feed(mock_net)
+
+    assert torch.allclose(
+        trainer.history.all_train["pc_loss"], torch.FloatTensor(losses)
+    )
+
+
+def test_validation_pc_loss_correctly_registered(trainer, val_loader, mock_net):
+    rng = np.random.default_rng(1)
+    losses = rng.uniform(size=len(val_loader))
+    mock_net.pc_loss.side_effect = losses
+    for batch in trainer(1):
+        for eval_batch in batch.evaluate(val_loader):
+            eval_batch.feed(mock_net)
+
+    assert len(trainer.history.validation["pc_loss"]) == 1
+
+    avg_loss = np.mean(losses)
+    assert pytest.approx(trainer.history.validation["pc_loss"].item()) == avg_loss
+
+
+def test_train_pc_loss_correctly_averaged(trainer, val_loader, mock_net):
+    n = 20
+    step = 5
+
+    rng = np.random.default_rng(1)
+    losses = rng.uniform(size=n)
+    mock_net.pc_loss.side_effect = losses
+    for batch in trainer(n):
+        if batch.every(step):
+            for _ in batch.evaluate(val_loader):
+                pass
+        batch.feed(mock_net)
+
+    k = n // step
+    assert len(trainer.history.train["pc_loss"]) == k - 1
+
+    for i in range(k - 1):
+        avg_loss = np.mean(losses[i * step : (i + 1) * step])
+        assert pytest.approx(trainer.history.train["pc_loss"][i].item()) == avg_loss
+
+
+def test_check_invalid_with_multi_parameter_report(trainer):
+    trainer.invalid_action = "raise"
+    with pytest.raises(DivergenceError):
+        for batch in trainer(2):
+            batch.test.report({"a": 0.0, "b": np.nan}, check_invalid=True)

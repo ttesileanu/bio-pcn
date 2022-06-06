@@ -6,7 +6,7 @@ import numpy as np
 
 import warnings
 
-from typing import Iterable
+from typing import Iterable, Union
 
 from cpcn.track import Tracker
 
@@ -56,41 +56,58 @@ class Batch:
         return len(self.x)
 
 
+def _check_valid(
+    field: Union[str, dict],
+    value: Union[None, int, float, Iterable, torch.Tensor] = None,
+    **kwargs,
+) -> bool:
+    """Check whether all values in `value` or in the keys of `field` (if `field` is
+    `dict`) are finite.
+    """
+    if not isinstance(field, str):
+        assert value is None
+        for crt_field, crt_value in field.items():
+            if not _check_valid(crt_field, crt_value, **kwargs):
+                return False
+        return True
+
+    assert value is not None
+
+    valid = True
+    if torch.is_tensor(value):
+        valid = torch.all(torch.isfinite(value))
+    elif hasattr(value, "__iter__"):
+        for elem in value:
+            if torch.is_tensor(elem):
+                if not torch.all(torch.isfinite(elem)):
+                    valid = False
+                    break
+            else:
+                if not np.all(np.isfinite(value)):
+                    valid = False
+                    break
+    else:
+        valid = np.all(np.isfinite(value))
+
+    return valid
+
+
 class _BatchReporter:
     """Object used to implement the `report` framework for `TrainerBatch`."""
 
-    def __init__(self, batch: "TrainingBatch"):
+    def __init__(self, batch: "TrainingBatch", name: str):
         self._batch = batch
-        self._tracker = self._batch.tracker
+        self._name = name
+        self._tracker = self._batch._tracker
 
-    def __getattr__(self, name: str):
-        return lambda *args, _name=name, **kwargs: self._report(_name, *args, **kwargs)
-
-    def _report(self, name: str, *args, **kwargs):
+    def report(self, *args, **kwargs):
         idx = self._batch.idx
         sample_idx = self._batch.sample_idx
 
         if kwargs.pop("check_invalid", False):
-            invalid_action = self._batch.trainer.invalid_action
-
+            invalid_action = self._batch._trainer.invalid_action
             if invalid_action != "none":
-                value = args[1]
-                valid = True
-                if torch.is_tensor(value):
-                    valid = torch.all(torch.isfinite(value))
-                elif hasattr(value, "__iter__"):
-                    for elem in value:
-                        if torch.is_tensor(elem):
-                            if not torch.all(torch.isfinite(elem)):
-                                valid = False
-                                break
-                        else:
-                            if not np.all(np.isfinite(value)):
-                                valid = False
-                                break
-                else:
-                    valid = np.all(np.isfinite(value))
-
+                valid = _check_valid(*args, **kwargs)
                 if not valid:
                     if invalid_action in ["stop", "raise", "warn+stop"]:
                         self._batch.terminate(
@@ -100,13 +117,30 @@ class _BatchReporter:
                         msg = f"divergence at batch {idx}, sample {sample_idx}"
                         warnings.warn(msg, DivergenceWarning)
 
-        report = getattr(self._tracker.report, name)
-        report(args[0], idx, *args[1:], **kwargs)
+        reporter = getattr(self._tracker, self._name)
+        reporter.report(idx, *args, **kwargs)
 
-        target_dict = getattr(self._tracker.history, name)
+        target_dict = getattr(self._tracker.history, self._name)
         n = len(target_dict["batch"][-1])
 
-        report("sample", idx, sample_idx + torch.arange(n), meld=True, overwrite=True)
+        reporter.report(idx, "sample", sample_idx + torch.arange(n), meld=True)
+
+    def accumulate(self, *args, **kwargs):
+        reporter = getattr(self._tracker, self._name)
+        reporter.accumulate(*args, **kwargs)
+
+    def report_accumulated(self, *args, **kwargs):
+        idx = self._batch.idx
+        reporter = getattr(self._tracker, self._name)
+        reporter.report_accumulated(idx)
+
+        sample_idx = self._batch.sample_idx
+        target_dict = getattr(self._tracker.history, self._name)
+
+        if "batch" in target_dict:
+            # if it is not present, it means the accumulator was empty
+            n = len(target_dict["batch"][-1])
+            reporter.report(idx, "sample", sample_idx + torch.arange(n), meld=True)
 
 
 class TrainingBatch(Batch):
@@ -114,18 +148,29 @@ class TrainingBatch(Batch):
     
     This helps train a network and can also be used to monitor tensor values.
 
-    The monitoring facility is used by employing the `report` construct; e.g.,
-        batch.report.weight("W", net.W[0])
-    reports the network's first `W` tensor inside the `weight` namespace under the name
+    The monitoring facility is used by employing the `report` construct on arbitrarily
+    named fields (though see below):
+        batch.weight.report("W", net.W[0])
+    reports the network's first `W` tensor inside the `weight` dictionary under the name
     `"W"`. `batch.report` automatically assigns `batch` index and `sample` index to the
     reported value.
 
     A check for invalid values can be done automatically like this:
-        batch.report.score("L", some_loss(net), check_invalid=True)
+        batch.score.report("L", some_loss(net), check_invalid=True)
     Invalid value here means either `nan`s or infinity. If such an invalid value is
     found, `batch.terminate()` is called so that the iteration ends on the next step.
     Depending on the trainer settings, the termination can either be silent, or it can
     be accompanied by a warning or an exception. See `Trainer`.
+
+    Values can be accumulated before reporting,
+        batch.score.accumulate("L", some_loss(net))
+    After any desired amount of accumulation, the values can be summarized and reported:
+        batch.score.report_accumulated()
+
+    Some metrics, such as `pc_loss`, are automatically calculated and recorded for every
+    training batch, stored in `history.all_train`. They are also accumulated so that an
+    entry of the average metric is made in `history.train` every time an evaluation run
+    ends (i.e., an evaluation iterator is used until the end).
 
     Attributes:
     :param x: input batch
@@ -152,10 +197,8 @@ class TrainingBatch(Batch):
         self.n = n
         self.sample_idx = sample_idx
 
-        self.trainer = iterator.trainer
-        self.tracker = self.trainer.tracker
-        self.report = _BatchReporter(self)
-
+        self._trainer = iterator.trainer
+        self._tracker = self._trainer.tracker
         self._iterator = iterator
         self._trainer = self._iterator.trainer
 
@@ -168,6 +211,11 @@ class TrainingBatch(Batch):
         from `net.relax()`, in `fast`.
         """
         ns = super().feed(net, **kwargs)
+
+        # evaluate and store metrics, such as pc_loss
+        pc_loss = net.pc_loss(ns.fast)
+        self.all_train.report("pc_loss", pc_loss)
+        self.train.accumulate("pc_loss", pc_loss)
 
         # calculate gradients
         net.calculate_weight_grad(ns.fast)
@@ -210,7 +258,10 @@ class TrainingBatch(Batch):
         
         See `EvaluationIterable`.
         """
-        return EvaluationIterable(self.trainer, val_loader)
+        return EvaluationIterable(self._trainer, val_loader, self)
+
+    def __getattr__(self, name: str):
+        return _BatchReporter(self, name)
 
 
 class TrainingIterable:
@@ -277,6 +328,43 @@ class TrainingIterable:
         return self.n_batches
 
 
+class EvaluationBatch(Batch):
+    """Handle for one evaluation batch.
+    
+    This contains a reference to the associated `train_batch` in addition to the usual
+    `Batch` attributes.
+
+    Some metrics, such as `pc_loss`, are automatically calculated, averaged over all
+    validation batches, and stored in `history.validation`. The end of the evaluation
+    iteration also triggers reporting of averaged training-mode metrics between the last
+    and current evaluation rounds (to be stored in `history.train`).
+    """
+
+    def __init__(
+        self, x: torch.Tensor, y: torch.Tensor, train_batch: TrainingBatch,
+    ):
+        super().__init__(x, y)
+
+        self.train_batch = train_batch
+
+    def feed(self, net, **kwargs) -> SimpleNamespace:
+        """Feed the batch to the network's `relax` method and collect validation-test
+        metrics.
+
+        :param net: network to feed the batch to
+        :param **kwargs: additional arguments to pass to `net.relax()`
+        :return: namespace containing the batch's `x` and `y`, as well as the output
+        from `net.relax()`, in `fast`.
+        """
+        ns = super().feed(net, **kwargs)
+
+        # evaluate and store metrics, such as pc_loss
+        pc_loss = net.pc_loss(ns.fast)
+        self.train_batch.validation.accumulate("pc_loss", pc_loss)
+
+        return ns
+
+
 class EvaluationIterable:
     """Iterable and corresponding iterator used for evaluation runs.
     
@@ -294,7 +382,8 @@ class EvaluationIterable:
             batch.feed()
             for val_batch in batch.evaluate(val_loader):
                 ns = val_batch.feed(net)
-                batch.report.latent("z", ns.z)
+                batch.latent.accumulate("z", ns.z)
+            batch.latent.report_accumulated()
             
             optimizer.step()
     
@@ -302,18 +391,26 @@ class EvaluationIterable:
         eval_iterable.run(val_loader)
     """
 
-    def __init__(self, trainer: "Trainer", loader: Iterable):
+    def __init__(
+        self, trainer: "Trainer", loader: Iterable, train_batch: TrainingBatch
+    ):
         self.trainer = trainer
         self.loader = loader
+        self.train_batch = train_batch
         self._it = None
 
     def __iter__(self) -> "EvaluationIterable":
         self._it = iter(self.loader)
         return self
 
-    def __next__(self) -> Batch:
-        x, y = next(self._it)
-        return Batch(x=x, y=y)
+    def __next__(self) -> EvaluationBatch:
+        try:
+            x, y = next(self._it)
+        except StopIteration:
+            self.train_batch.validation.report_accumulated()
+            self.train_batch.train.report_accumulated()
+            raise StopIteration
+        return EvaluationBatch(x=x, y=y, train_batch=self.train_batch)
 
     def run(self, net):
         """Run a full validation run.
@@ -339,7 +436,7 @@ class Trainer:
     Attributes
     :param loader: iterable returning pairs of input and output batches
     :param tracker: `Tracker` object used for keeping track of reported tensors;
-        normally this should not be accessed directly; use the `TrainerBatch.report`
+        normally this should not be accessed directly; use the `TrainerBatch.foo.report`
         mechanism to report and use `history` to access the results
     :param history: reference to the tracker's history namespace
     """
