@@ -67,15 +67,24 @@ class _Reporter:
 
     def calculate_accumulated(self, field: str) -> torch.Tensor:
         """Average all accumulated values for a given field."""
+        # make an accumulator field, if it does not exist
+        if not hasattr(self.tracker._accumulator, self.name):
+            setattr(self.tracker._accumulator, self.name, {})
         accumulator = getattr(self.tracker._accumulator, self.name)
-        values = accumulator[field]
-        mean_value = torch.cat(values).mean(dim=0)
+        if field in accumulator:
+            values = accumulator[field]
+            mean_value = torch.cat(values).mean(dim=0)
+        else:
+            mean_value = torch.tensor(torch.nan)
         return mean_value
 
     def report_accumulated(self, idx: int):
         """Average all accumulated values, report them, and clear up accumulator."""
         if not hasattr(self.tracker.history, self.name):
             setattr(self.tracker.history, self.name, {})
+        # make an accumulator field, if it does not exist
+        if not hasattr(self.tracker._accumulator, self.name):
+            setattr(self.tracker._accumulator, self.name, {})
         accumulator = getattr(self.tracker._accumulator, self.name)
         for field in accumulator:
             self._report(field, self.calculate_accumulated(field), idx=idx)

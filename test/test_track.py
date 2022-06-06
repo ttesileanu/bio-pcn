@@ -355,3 +355,21 @@ def test_calculate_accumulated_does_not_clear_accumulator(tracker):
     accum_val = tracker.test.calculate_accumulated("x").item()
     assert pytest.approx(accum_val) != values[1]
     assert pytest.approx(accum_val) == sum(values) / len(values)
+
+
+def test_calculate_accumulated_returns_nan_if_empty_dict(tracker):
+    a = tracker.test.calculate_accumulated("x")
+    assert torch.isnan(a)
+
+
+def test_calculate_accumulated_returns_nan_if_empty_field(tracker):
+    tracker.test.accumulate("y", 0)
+    a = tracker.test.calculate_accumulated("x")
+    assert torch.isnan(a)
+
+def test_report_accumulated_creates_empty_dict_if_accumulator_dict_empty(tracker):
+    tracker.test.report_accumulated(0)
+    tracker.finalize()
+
+    assert hasattr(tracker.history, "test")
+    assert len(tracker.history.test) == 0
