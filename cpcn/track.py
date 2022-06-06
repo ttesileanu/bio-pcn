@@ -25,14 +25,12 @@ def _dispatch_values(
         return
 
     if not torch.is_tensor(value):
-        if isinstance(value, int):
-            value = torch.LongTensor([value])
-        elif hasattr(value, "__iter__"):
+        if hasattr(value, "__iter__"):
             for i, sub_value in enumerate(value):
                 _dispatch_values(reporter, f"{field}:{i}", sub_value, **kwargs)
             return
         else:
-            value = torch.FloatTensor([value])
+            value = torch.tensor(value)
     else:
         value = value.detach().cpu().clone()
 

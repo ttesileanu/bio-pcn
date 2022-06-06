@@ -367,9 +367,34 @@ def test_calculate_accumulated_returns_nan_if_empty_field(tracker):
     a = tracker.test.calculate_accumulated("x")
     assert torch.isnan(a)
 
+
 def test_report_accumulated_creates_empty_dict_if_accumulator_dict_empty(tracker):
     tracker.test.report_accumulated(0)
     tracker.finalize()
 
     assert hasattr(tracker.history, "test")
     assert len(tracker.history.test) == 0
+
+
+def test_reporting_scalars_leads_to_vector_history_float(tracker):
+    tracker.test.report(0, "x", 0.0)
+    tracker.test.report(1, "x", 0.5)
+    tracker.finalize()
+
+    assert tracker.test["x"].ndim == 1
+
+
+def test_reporting_scalars_leads_to_vector_history_int(tracker):
+    tracker.test.report(0, "x", 0)
+    tracker.test.report(1, "x", 5)
+    tracker.finalize()
+
+    assert tracker.test["x"].ndim == 1
+
+
+def test_index_is_vector(tracker):
+    tracker.test.report(0, "x", 0.0)
+    tracker.test.report(1, "x", 1.0)
+    tracker.finalize()
+
+    assert tracker.test["idx"].ndim == 1
