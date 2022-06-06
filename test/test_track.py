@@ -335,3 +335,23 @@ def test_report_dict_with_non_tensors(tracker):
 
     assert len(tracker.test["x"]) == 1
     assert len(tracker.test["y"]) == 1
+
+
+def test_calculate_accumulated(tracker):
+    values = [5.0, 2.5, -0.3]
+    for value in values:
+        tracker.test.accumulate("x", value)
+    mean = tracker.test.calculate_accumulated("x")
+
+    assert pytest.approx(mean.item()) == sum(values) / len(values)
+
+
+def test_calculate_accumulated_does_not_clear_accumulator(tracker):
+    values = [0.5, -0.3]
+    tracker.test.accumulate("x", values[0])
+    assert pytest.approx(tracker.test.calculate_accumulated("x").item()) == values[0]
+
+    tracker.test.accumulate("x", values[1])
+    accum_val = tracker.test.calculate_accumulated("x").item()
+    assert pytest.approx(accum_val) != values[1]
+    assert pytest.approx(accum_val) == sum(values) / len(values)

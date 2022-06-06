@@ -65,14 +65,20 @@ class _Reporter:
             setattr(self.tracker._accumulator, self.name, {})
         _dispatch_values(self._accumulate, *args, **kwargs)
 
+    def calculate_accumulated(self, field: str) -> torch.Tensor:
+        """Average all accumulated values for a given field."""
+        accumulator = getattr(self.tracker._accumulator, self.name)
+        values = accumulator[field]
+        mean_value = torch.cat(values).mean(dim=0)
+        return mean_value
+
     def report_accumulated(self, idx: int):
         """Average all accumulated values, report them, and clear up accumulator."""
-        accumulator = getattr(self.tracker._accumulator, self.name)
         if not hasattr(self.tracker.history, self.name):
             setattr(self.tracker.history, self.name, {})
-        for field, values in accumulator.items():
-            mean_value = torch.cat(values).mean(dim=0)
-            self._report(field, mean_value, idx=idx)
+        accumulator = getattr(self.tracker._accumulator, self.name)
+        for field in accumulator:
+            self._report(field, self.calculate_accumulated(field), idx=idx)
 
         accumulator.clear()
 
@@ -171,6 +177,9 @@ class Tracker:
         tracker.name.report_accumulated(idx)
     The values `value1`, ..., `valueN` are averaged together and the mean is reported
     and associated to the given index, `idx`.
+
+    You can also read out the accumulated value by using
+        tracker.name.calculate_accumulated(field)
 
     Attributes:
     :param index_name: name used for the index field
