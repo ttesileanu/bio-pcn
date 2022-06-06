@@ -21,7 +21,7 @@ def _dispatch_values(
             raise ValueError("Tracker: value used with multi-parameter report")
 
         for crt_key, crt_value in field.items():
-            reporter(crt_key, crt_value, **kwargs)
+            _dispatch_values(reporter, crt_key, crt_value, **kwargs)
         return
 
     if not torch.is_tensor(value):
@@ -29,7 +29,7 @@ def _dispatch_values(
             value = torch.LongTensor([value])
         elif hasattr(value, "__iter__"):
             for i, sub_value in enumerate(value):
-                reporter(f"{field}:{i}", sub_value, **kwargs)
+                _dispatch_values(reporter, f"{field}:{i}", sub_value, **kwargs)
             return
         else:
             value = torch.FloatTensor([value])

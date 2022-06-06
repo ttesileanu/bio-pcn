@@ -319,3 +319,19 @@ def test_report_accumulated_resets_accumulator(tracker):
     tracker.finalize()
 
     assert pytest.approx(tracker.test["x"][-1].item()) == xs[1]
+
+
+def test_report_iterable_of_non_tensors(tracker):
+    tracker.test.report(0, "x", [0, 0])
+    tracker.finalize()
+
+    assert len(tracker.test["x:0"]) == 1
+    assert len(tracker.test["x:1"]) == 1
+
+
+def test_report_dict_with_non_tensors(tracker):
+    tracker.test.report(0, {"x": torch.tensor(1.0), "y": 2.0})
+    tracker.finalize()
+
+    assert len(tracker.test["x"]) == 1
+    assert len(tracker.test["y"]) == 1
