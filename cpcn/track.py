@@ -5,7 +5,7 @@ import torch
 import numpy as np
 
 from types import SimpleNamespace
-from typing import Union, Iterable, Callable
+from typing import Union, Iterable, Callable, Tuple
 
 
 def _dispatch_values(
@@ -52,7 +52,7 @@ class _Reporter:
         self.tracker = tracker
         self.name = name
 
-    def report(self, idx: int, *args, **kwargs):
+    def report(self, idx: Union[int, Tuple[int]], *args, **kwargs):
         """Report one or multiple values, layered or not, with melding or not."""
         # make a history field, if it does not exist
         if not hasattr(self.tracker.history, self.name):
@@ -79,7 +79,7 @@ class _Reporter:
             mean_value = np.nan
         return mean_value
 
-    def report_accumulated(self, idx: int):
+    def report_accumulated(self, idx: Union[int, Tuple[int]]):
         """Average all accumulated values, report them, and clear up accumulator."""
         if not hasattr(self.tracker.history, self.name):
             setattr(self.tracker.history, self.name, {})
@@ -96,34 +96,54 @@ class _Reporter:
         self,
         field: Union[str, dict],
         value: Union[None, int, float, Iterable, torch.Tensor, np.ndarray] = None,
-        idx: int = None,
+        idx: Union[int, Tuple[int]] = None,
         meld: bool = False,
     ):
+        # `idx`` is only given a default value becaus `value` needs one, but it should
+        # be non-None
         assert idx is not None
         if not meld:
             value = np.expand_dims(value, axis=0)
 
-        index_name = self.tracker.index_name
+        # make sure all relevant dictionaries exist
+        index_names = self.tracker.index_name
+        if isinstance(index_names, str):
+            # handle single- and multi-index
+            index_names = [index_names]
+            idx = [idx]
+        else:
+            index_names = list(index_names)
+
         target = getattr(self.tracker.history, self.name)
-        for key in [index_name, field]:
+        for key in index_names + [field]:
             if key not in target:
                 target[key] = []
 
-        idxs = target[index_name]
+        # record the indices -- unless they've been recorded already
+        n_field = len(target[field])
+        for crt_idx, index_name in zip(idx, index_names):
+            recorded_idxs = target[index_name]
+            n_idxs = len(recorded_idxs)
 
-        # try to make sure we don't have mismatched entries
-        if len(target[field]) not in [len(idxs), len(idxs) - 1]:
-            raise IndexError(f"Tracker: mismatched number of reports in {self.name}")
+            # try to make sure we don't have mismatched entries
+            if n_field not in [n_idxs, n_idxs - 1]:
+                raise IndexError(
+                    f"Tracker: mismatched number of reports in {self.name}"
+                )
 
-        crt_idxs = np.repeat(idx, len(value))
-        if len(target[field]) == len(idxs):
-            # add new index entry
-            idxs.append(crt_idxs)
-        else:
-            # the index entry was already added
-            # make sure the index is compatible with what we had before
-            if not np.array_equal(crt_idxs, idxs[-1]):
-                raise IndexError(f"Tracker: mismatched index values in {self.name}")
+            # expand indices to array
+            if np.size(crt_idx) == 1:
+                crt_idx = np.repeat(crt_idx, len(value))
+            else:
+                crt_idx = np.copy(crt_idx)
+            if n_field == n_idxs:
+                # add new index entry
+                recorded_idxs.append(crt_idx)
+            else:
+                # the index entry was already added
+                # make sure the index is compatible with what we had before
+                if not np.array_equal(crt_idx, recorded_idxs[-1]):
+                    raise IndexError(f"Tracker: mismatched index values in {self.name}")
 
         # add new history entry
         target[field].append(value)
@@ -157,6 +177,8 @@ class Tracker:
     present in the `"idx"` field at the right location but it has the wrong value, an
     `IndexError` is raised.
 
+    Note that multiple indices can be used; see `index_name` below.
+
     Dictionary names can be any valid Python variable name, except for those that are
     already attributes or methods of `Tracker`; see below.
 
@@ -181,6 +203,10 @@ class Tracker:
     as many entries as the length of the tensors/arrays. The constraint here is that, if
     we store more than one field per namespace, all have to have the same batch size.
 
+    When using `meld`, the index (per each level; see below) can either be a scalar or
+    a vector of the same sizeas the batch of values that is getting recorded. In the
+    former case, the index will be repeated for each sample in the batch.
+
     Finally, you can accumulate values and then report a summary of the accumulated
     values using the following syntax:
         tracker.name.accumulate(field, value1)
@@ -194,12 +220,14 @@ class Tracker:
         tracker.name.calculate_accumulated(field)
 
     Attributes:
-    :param index_name: name used for the index field
+    :param index_name: name or tuple of names used for the index field; if tuple, each
+        `idx` argument to the `report` functions should be a tuple, giving the index for
+        each level corresponding to the levels in `index_name`
     :param history: namespace holding reported values
     :param finalized: indicator whether `self.finalize()` was called
     """
 
-    def __init__(self, index_name: str = "idx"):
+    def __init__(self, index_name: Union[str, Tuple[str]] = "idx"):
         """Construct tracker.
         
         :param index_name: name of the index field
@@ -220,8 +248,8 @@ class Tracker:
 
         self.finalized = True
 
-    def set_index_name(self, index_name: str):
-        """Set the name used as index."""
+    def set_index_name(self, index_name: Union[str, Tuple[str]]):
+        """Set the name(s) used as index."""
         self.index_name = index_name
 
     def __repr__(self) -> str:

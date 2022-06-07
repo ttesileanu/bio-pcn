@@ -287,7 +287,7 @@ def test_finalize_does_not_average_over_entries_with_same_idx(tracker):
     x = torch.FloatTensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
     i = torch.LongTensor([1, 1, 1])
     for crt_i, crt_x in zip(i, x):
-        tracker.test.report(crt_i, "x", crt_x)
+        tracker.test.report(crt_i.item(), "x", crt_x)
     tracker.finalize()
 
     assert len(tracker.test["x"]) == 3
@@ -439,3 +439,73 @@ def test_index_is_vector(tracker):
     tracker.finalize()
 
     assert tracker.test["idx"].ndim == 1
+
+
+def test_multi_index_report(tracker):
+    tracker.set_index_name(("idx1", "idx2"))
+    tracker.test.report((0, 0), "x", 0.0)
+    tracker.finalize()
+
+    assert "idx1" in tracker.test
+    assert "idx2" in tracker.test
+
+    assert len(tracker.test["idx1"]) == 1
+    assert len(tracker.test["idx2"]) == 1
+
+
+def test_multi_index_multiple_reports(tracker):
+    tracker.set_index_name(("idx1", "idx2"))
+    tracker.test.report((0, 0), "x", 1.0)
+    tracker.test.report((0, 0), "y", 2.0)
+
+    tracker.test.report((0, 1), "x", -1.0)
+    tracker.test.report((0, 1), "y", -2.0)
+
+    tracker.finalize()
+
+    np.testing.assert_equal(tracker.test["idx1"], [0, 0])
+    np.testing.assert_equal(tracker.test["idx2"], [0, 1])
+
+
+def test_multi_index_with_meld(tracker):
+    tracker.set_index_name(("idx1", "idx2"))
+    a = torch.FloatTensor([[1.0, 2.0], [3.0, -2.0], [1.0, -1.0]])
+    tracker.test.report((0, 0), "x", a, meld=True)
+    tracker.test.report((0, 0), "y", a, meld=True)
+
+    tracker.test.report((0, 1), "x", -a, meld=True)
+    tracker.test.report((0, 1), "y", -a, meld=True)
+
+    tracker.finalize()
+
+    np.testing.assert_equal(tracker.test["idx1"], (2 * len(a)) * [0])
+    np.testing.assert_equal(tracker.test["idx2"], len(a) * [0] + len(a) * [1])
+
+
+def test_meld_with_iterable_idx(tracker):
+    a = torch.FloatTensor([[1.0, 2.0], [3.0, -2.0], [1.0, -1.0]])
+
+    idxs = list(range(len(a)))
+    tracker.test.report(idxs, "x", a, meld=True)
+    tracker.test.report(idxs, "y", a, meld=True)
+
+    tracker.finalize()
+
+    np.testing.assert_equal(tracker.test["idx"], idxs)
+
+
+def test_meld_with_iterable_multi_idx(tracker):
+    tracker.set_index_name(("idx1", "idx2"))
+    a = torch.FloatTensor([[1.0, 2.0], [3.0, -2.0], [1.0, -1.0]])
+
+    idxs = list(range(len(a)))
+    tracker.test.report((0, idxs), "x", a, meld=True)
+    tracker.test.report((0, idxs), "y", a, meld=True)
+
+    tracker.test.report((1, idxs), "x", a, meld=True)
+    tracker.test.report((1, idxs), "y", a, meld=True)
+
+    tracker.finalize()
+
+    np.testing.assert_equal(tracker.test["idx1"], len(idxs) * [0] + len(idxs) * [1])
+    np.testing.assert_equal(tracker.test["idx2"], idxs + idxs)
