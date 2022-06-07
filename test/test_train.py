@@ -38,7 +38,7 @@ def val_loader_one():
 @pytest.fixture
 def mock_net():
     net = Mock()
-    net.relax.return_value = SimpleNamespace()
+    net.relax.return_value = SimpleNamespace(z=[torch.FloatTensor([0.0])])
     net.pc_loss.return_value = torch.tensor(0.0)
 
     return net
@@ -116,7 +116,7 @@ def test_batch_feed_sends_other_kwargs_to_net_relax(trainer, mock_net):
 
 
 def test_batch_feed_return_contains_results_from_relax_in_fast(trainer, mock_net):
-    ret_val = "test"
+    ret_val = SimpleNamespace(z=[], foo="test")
     mock_net.relax.return_value = ret_val
     for batch in trainer(1):
         ns = batch.feed(mock_net)
@@ -193,7 +193,7 @@ def test_evaluate_batch_feed_sends_other_kwargs_to_net_relax(
 def test_evaluate_batch_feed_return_contains_results_from_relax_in_fast(
     trainer, val_loader_one, mock_net
 ):
-    ret_val = "test"
+    ret_val = SimpleNamespace(z=[], foo="test")
     mock_net.relax.return_value = ret_val
     train_batch = next(iter(trainer(1)))
     for batch in train_batch.evaluate(val_loader_one):
@@ -426,7 +426,7 @@ def test_pc_loss_metric_automatically_made(trainer, name, val_loader, mock_net):
 
 
 def test_pc_loss_correctly_registered_in_all_train(trainer, mock_net):
-    losses = [3.5, 2.0, 1.2]
+    losses = [torch.tensor(_) for _ in [3.5, 2.0, 1.2]]
     mock_net.pc_loss.side_effect = losses
     for batch in trainer(len(losses)):
         batch.feed(mock_net)
@@ -474,3 +474,66 @@ def test_check_invalid_with_multi_parameter_report(trainer):
     with pytest.raises(DivergenceError):
         for batch in trainer(2):
             batch.test.report({"a": 0.0, "b": np.nan}, check_invalid=True)
+
+
+def test_metrics_contains_pc_loss_by_default(trainer):
+    assert "pc_loss" in trainer.metrics
+
+
+def test_removing_pc_loss_from_metrics_removes_default_reporting(
+    trainer, mock_net, val_loader
+):
+    trainer.metrics.pop("pc_loss")
+    for batch in trainer(10):
+        batch.feed(mock_net)
+        if batch.every(3):
+            batch.evaluate(val_loader).run(mock_net)
+
+    assert not hasattr(trainer.history, "all_train")
+    for field in ["train", "validation"]:
+        crt_dict = getattr(trainer.history, field)
+        assert len(crt_dict) == 0
+
+
+def test_removing_pc_loss_from_metrics_but_having_different_one_removes_it_from_dict(
+    trainer, mock_net, val_loader
+):
+    trainer.metrics = {"nop": lambda *args, **kwargs: 0.0}
+    for batch in trainer(10):
+        batch.feed(mock_net)
+        if batch.every(2):
+            batch.evaluate(val_loader).run(mock_net)
+
+    for field in ["all_train", "train", "validation"]:
+        crt_dict = getattr(trainer.history, field)
+        assert "pc_loss" not in crt_dict
+        assert "nop" in crt_dict
+
+
+@pytest.mark.parametrize("field", ["all_train", "train", "validation"])
+def test_custom_metric_stores_values(trainer, field, val_loader):
+    def custom_metric(ns, net) -> float:
+        norm_z = sum(np.linalg.norm(_) for _ in ns.fast.z)
+        norm_w = np.trace(net.W)
+        return norm_z + norm_w
+
+    net = Mock()
+    net.W = torch.FloatTensor([[0.3, 0.5], [-0.2, 0.1]])
+    net.relax.side_effect = lambda x, y: SimpleNamespace(z=[2 * x, x.T @ y])
+    trainer.metrics = {"custom": custom_metric}
+
+    for batch in trainer(10):
+        if batch.every(2):
+            for eval_batch in batch.evaluate(val_loader):
+                eval_ns = eval_batch.feed(net)
+                batch.test_validation.accumulate("custom", custom_metric(eval_ns, net))
+            batch.test_validation.report_accumulated()
+            batch.test_train.report_accumulated()
+
+        ns = batch.feed(net)
+        batch.test_all_train.report("custom", custom_metric(ns, net))
+        batch.test_train.accumulate("custom", custom_metric(ns, net))
+
+    auto_dict = getattr(trainer.history, field)
+    test_dict = getattr(trainer.history, "test_" + field)
+    np.testing.assert_allclose(auto_dict["custom"], test_dict["custom"])

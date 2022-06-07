@@ -174,6 +174,9 @@ class TrainingBatch(Batch):
     entry of the average metric is made in `history.train` every time an evaluation run
     ends (i.e., an evaluation iterator is used until the end).
 
+    Adding another metric (or removing `pc_loss`) can be achieved by directly accessing
+    the `metrics` dictionary of the `Trainer` object. See `Trainer` doc.
+
     Attributes:
     :param x: input batch
     :param y: output batch
@@ -215,9 +218,11 @@ class TrainingBatch(Batch):
         ns = super().feed(net, **kwargs)
 
         # evaluate and store metrics, such as pc_loss
-        pc_loss = net.pc_loss(ns.fast)
-        self.all_train.report("pc_loss", pc_loss)
-        self.train.accumulate("pc_loss", pc_loss)
+        metrics = self._trainer.metrics
+        for metric_name, metric_fct in metrics.items():
+            metric = metric_fct(ns, net)
+            self.all_train.report(metric_name, metric)
+            self.train.accumulate(metric_name, metric)
 
         # calculate gradients
         net.calculate_weight_grad(ns.fast)
@@ -336,10 +341,10 @@ class EvaluationBatch(Batch):
     This contains a reference to the associated `train_batch` in addition to the usual
     `Batch` attributes.
 
-    Some metrics, such as `pc_loss`, are automatically calculated, averaged over all
+    The metrics from `Trainer.metrics` are automatically calculated, averaged over all
     validation batches, and stored in `history.validation`. The end of the evaluation
     iteration also triggers reporting of averaged training-mode metrics between the last
-    and current evaluation rounds (to be stored in `history.train`).
+    and current evaluation rounds (to be stored in `history.train`). See `Trainer`.
     """
 
     def __init__(
@@ -361,8 +366,10 @@ class EvaluationBatch(Batch):
         ns = super().feed(net, **kwargs)
 
         # evaluate and store metrics, such as pc_loss
-        pc_loss = net.pc_loss(ns.fast)
-        self.train_batch.validation.accumulate("pc_loss", pc_loss)
+        metrics = self.train_batch._trainer.metrics
+        for metric_name, metric_fct in metrics.items():
+            metric = metric_fct(ns, net)
+            self.train_batch.validation.accumulate(metric_name, metric)
 
         return ns
 
@@ -434,6 +441,11 @@ class Trainer:
     Calling a `Trainer` object returns a `TrainerIterable`. Iterating through that
     iterable yields `TrainerBatch` objects, which can be used to train the network and
     report values to a `Tracker`.
+
+    The `Trainer` evaluates certain metrics (see the `metrics` attribute below) for
+    every training and evaluation batch, storing the training values in `all_train`, and
+    averaging the scores for the evaluation batches into `validation`. The training
+    results between consecutive validation runs are averaged and stored in `train`.
     
     Attributes
     :param loader: iterable returning pairs of input and output batches
@@ -441,6 +453,12 @@ class Trainer:
         normally this should not be accessed directly; use the `TrainerBatch.foo.report`
         mechanism to report and use `history` to access the results
     :param history: reference to the tracker's history namespace
+    :param metrics: dictionary of metrics to be calculated during both training and
+        evaluation; the keys are strings (the names of the metrics), the values are
+        callables with signature
+            metric(ns, net) -> float
+        where `ns` is the output from `batch.feed` and `net` is the network that is
+        being trained.
     """
 
     def __init__(self, loader: Iterable, invalid_action: str = "none"):
@@ -458,6 +476,7 @@ class Trainer:
         self.tracker = Tracker(index_name="batch")
         self.history = self.tracker.history
         self.invalid_action = invalid_action
+        self.metrics = {"pc_loss": lambda ns, net: net.pc_loss(ns.fast.z).item()}
 
     def __call__(self, n_batches: int) -> TrainingIterable:
         return TrainingIterable(self, n_batches)
