@@ -58,7 +58,7 @@ class Batch:
 
 def _check_valid(
     field: Union[str, dict],
-    value: Union[None, int, float, Iterable, torch.Tensor] = None,
+    value: Union[None, int, float, Iterable, torch.Tensor, np.ndarray] = None,
     **kwargs,
 ) -> bool:
     """Check whether all values in `value` or in the keys of `field` (if `field` is
@@ -76,6 +76,8 @@ def _check_valid(
     valid = True
     if torch.is_tensor(value):
         valid = torch.all(torch.isfinite(value))
+    elif isinstance(value, np.ndarray):
+        valid = np.all(np.isfinite(value))
     elif hasattr(value, "__iter__"):
         for elem in value:
             if torch.is_tensor(elem):
@@ -87,7 +89,7 @@ def _check_valid(
                     valid = False
                     break
     else:
-        valid = np.all(np.isfinite(value))
+        valid = np.isfinite(value)
 
     return valid
 
@@ -123,7 +125,7 @@ class _BatchReporter:
         target_dict = getattr(self._tracker.history, self._name)
         n = len(target_dict["batch"][-1])
 
-        reporter.report(idx, "sample", sample_idx + torch.arange(n), meld=True)
+        reporter.report(idx, "sample", sample_idx + np.arange(n), meld=True)
 
     def accumulate(self, *args, **kwargs):
         reporter = getattr(self._tracker, self._name)
@@ -140,7 +142,7 @@ class _BatchReporter:
         if "batch" in target_dict:
             # if it is not present, it means the accumulator was empty
             n = len(target_dict["batch"][-1])
-            reporter.report(idx, "sample", sample_idx + torch.arange(n), meld=True)
+            reporter.report(idx, "sample", sample_idx + np.arange(n), meld=True)
 
 
 class TrainingBatch(Batch):

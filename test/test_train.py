@@ -241,7 +241,7 @@ def test_report_fills_in_batch(trainer):
     assert hasattr(trainer.history, "test")
     assert "batch" in trainer.history.test
     assert len(trainer.history.test["batch"]) == 3
-    assert torch.allclose(trainer.history.test["batch"], torch.arange(3))
+    np.testing.assert_allclose(trainer.history.test["batch"], np.arange(3))
 
 
 def test_report_fills_in_sample(trainer):
@@ -251,7 +251,9 @@ def test_report_fills_in_sample(trainer):
     assert len(trainer.history.test["sample"]) == 3
 
     batch_size = len(batch.x)
-    assert torch.allclose(trainer.history.test["sample"], torch.arange(3) * batch_size)
+    np.testing.assert_allclose(
+        trainer.history.test["sample"], np.arange(3) * batch_size
+    )
 
 
 def test_end_of_iteration_calls_tracker_finalized(trainer):
@@ -310,6 +312,7 @@ def test_batch_terminate_only_terminates_at_the_end_of_the_for_loop(trainer):
         torch.FloatTensor([0.0, np.inf]),
         [1.0, np.nan],
         [torch.FloatTensor([0.2, 0.3]), torch.FloatTensor([np.inf, np.nan])],
+        np.array([np.nan, -np.inf]),
     ],
 )
 def test_report_with_check_invalid(trainer, value):
@@ -318,6 +321,8 @@ def test_report_with_check_invalid(trainer, value):
     trainer.invalid_action = "stop"
     if torch.is_tensor(value):
         normal = torch.ones_like(value)
+    elif isinstance(value, np.ndarray):
+        normal = np.ones_like(value)
     elif hasattr(value, "__len__"):
         if torch.is_tensor(value[0]):
             normal = [torch.ones_like(_) for _ in value]
@@ -426,9 +431,7 @@ def test_pc_loss_correctly_registered_in_all_train(trainer, mock_net):
     for batch in trainer(len(losses)):
         batch.feed(mock_net)
 
-    assert torch.allclose(
-        trainer.history.all_train["pc_loss"], torch.FloatTensor(losses)
-    )
+    np.testing.assert_allclose(trainer.history.all_train["pc_loss"], losses)
 
 
 def test_validation_pc_loss_correctly_registered(trainer, val_loader, mock_net):
