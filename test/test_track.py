@@ -3,6 +3,7 @@ import pytest
 from cpcn.track import Tracker
 
 import torch
+import numpy as np
 
 
 @pytest.fixture
@@ -28,7 +29,38 @@ def test_tensors_coalesced_after_finalize(tracker):
     tracker.finalize()
 
     assert "foo" in tracker.history.test
-    assert torch.allclose(tracker.history.test["foo"], torch.FloatTensor([a, b]))
+    np.testing.assert_allclose(tracker.history.test["foo"], [a, b])
+
+
+def test_finalized_history_contains_arrays(tracker):
+    a = 3.0
+    b = 2.0
+    tracker.test.report(0, "foo", torch.tensor(a))
+    tracker.test.report(2, "foo", torch.tensor(b))
+    tracker.finalize()
+
+    assert isinstance(tracker.test["foo"], np.ndarray)
+
+
+def test_finalized_idx_field_contains_arrays(tracker):
+    a = 3.0
+    b = 2.0
+    tracker.test.report(0, "foo", torch.tensor(a))
+    tracker.test.report(2, "foo", torch.tensor(b))
+    tracker.finalize()
+
+    assert isinstance(tracker.test["idx"], np.ndarray)
+
+
+def test_storing_arrays(tracker):
+    a = 3.0
+    b = 2.0
+    tracker.test.report(0, "foo", np.array(a))
+    tracker.test.report(2, "foo", np.array(b))
+    tracker.finalize()
+
+    assert "foo" in tracker.history.test
+    np.testing.assert_allclose(tracker.history.test["foo"], [a, b])
 
 
 def test_reports_can_be_accessed_without_history(tracker):
@@ -39,7 +71,7 @@ def test_reports_can_be_accessed_without_history(tracker):
     tracker.finalize()
 
     assert "foo" in tracker.test
-    assert torch.allclose(tracker.test["foo"], torch.FloatTensor([a, b]))
+    np.testing.assert_allclose(tracker.history.test["foo"], [a, b])
 
 
 def test_idx_field_automatically_generated(tracker):
@@ -49,7 +81,7 @@ def test_idx_field_automatically_generated(tracker):
     tracker.finalize()
 
     assert "idx" in tracker.test
-    assert torch.allclose(tracker.test["idx"], torch.LongTensor(idxs))
+    np.testing.assert_equal(tracker.test["idx"], idxs)
 
 
 def test_report_scalar_nontensors(tracker):
@@ -57,7 +89,7 @@ def test_report_scalar_nontensors(tracker):
     tracker.foo.report(0, "bar", x)
     tracker.finalize()
 
-    assert torch.allclose(tracker.foo["bar"], torch.FloatTensor([x]))
+    np.testing.assert_allclose(tracker.foo["bar"], [x])
 
 
 def test_access_raises_if_called_for_inexistent_field(tracker):
@@ -66,12 +98,12 @@ def test_access_raises_if_called_for_inexistent_field(tracker):
         tracker.test["foo"]
 
 
-def test_report_ints_leads_to_long_tensor(tracker):
+def test_report_ints_leads_to_int64_array(tracker):
     i = 3
     tracker.foo.report(0, "bar", i)
     tracker.finalize()
 
-    assert torch.allclose(tracker.foo["bar"], torch.LongTensor([i]))
+    assert tracker.foo["bar"].dtype == "int64"
 
 
 def test_report_list_makes_perlayer_entries(tracker):
@@ -81,7 +113,7 @@ def test_report_list_makes_perlayer_entries(tracker):
 
     for i in range(len(x)):
         assert f"x:{i}" in tracker.test
-        assert torch.allclose(tracker.test[f"x:{i}"], x[i])
+        np.testing.assert_allclose(tracker.test[f"x:{i}"][-1], x[i])
 
 
 def test_report_adds_row_index_to_tensors(tracker):
@@ -98,7 +130,7 @@ def test_report_stacks_tensors_properly(tracker):
         tracker.test.report(i, "x", row)
     tracker.finalize()
 
-    assert torch.allclose(tracker.test["x"], x)
+    np.testing.assert_allclose(tracker.test["x"], x)
 
 
 def test_set_index_name(tracker):
@@ -136,12 +168,12 @@ def test_repr(tracker):
     assert s.endswith(")")
 
 
-def test_report_detaches_tensor(tracker):
+def test_report_works_with_tensor_that_requires_grad(tracker):
     x = torch.FloatTensor([1.0, 2.0]).requires_grad_()
     tracker.test.report(0, "x", x)
     tracker.finalize()
 
-    assert tracker.test["x"].is_leaf
+    assert isinstance(tracker.test["x"], np.ndarray)
 
 
 def test_report_clones_tensor(tracker):
@@ -153,7 +185,7 @@ def test_report_clones_tensor(tracker):
     y[0, 1] = -2.0
     tracker.finalize()
 
-    assert torch.allclose(tracker.foo["y"], y_orig)
+    np.testing.assert_allclose(tracker.foo["y"][-1], y_orig)
 
 
 def test_idx_is_not_duplicated_when_reporting_multiple_vars(tracker):
@@ -172,8 +204,8 @@ def test_report_higher_dim_tensor(tracker):
     tracker.finalize()
 
     assert len(tracker.test["foo"]) == 2
-    assert torch.allclose(tracker.test["foo"][0], x)
-    assert torch.allclose(tracker.test["foo"][1], y)
+    np.testing.assert_allclose(tracker.test["foo"][0], x)
+    np.testing.assert_allclose(tracker.test["foo"][1], y)
 
 
 def test_report_meld(tracker):
@@ -194,7 +226,7 @@ def test_report_meld_repeats_idx_value(tracker):
     )
     tracker.finalize()
 
-    assert torch.allclose(tracker.test["idx"], torch.tensor(idx))
+    np.testing.assert_allclose(tracker.test["idx"], idx)
 
 
 def test_report_meld_raises_if_mismatched_sizes(tracker):
@@ -222,8 +254,8 @@ def test_report_multiple_fields_at_once(tracker):
     assert len(tracker.test["x"]) == 1
     assert len(tracker.test["y"]) == 1
 
-    assert torch.allclose(tracker.test["x"][0], x)
-    assert torch.allclose(tracker.test["y"][0], y)
+    np.testing.assert_allclose(tracker.test["x"][0], x)
+    np.testing.assert_allclose(tracker.test["y"][0], y)
 
 
 def test_report_multiple_fields_works_with_meld(tracker):
@@ -233,8 +265,8 @@ def test_report_multiple_fields_works_with_meld(tracker):
     tracker.finalize()
 
     assert len(tracker.test["idx"]) == 3
-    assert torch.allclose(tracker.test["x"], x)
-    assert torch.allclose(tracker.test["y"], y)
+    np.testing.assert_allclose(tracker.test["x"], x)
+    np.testing.assert_allclose(tracker.test["y"], y)
 
 
 def test_report_multilayer_works_with_meld(tracker):
@@ -247,8 +279,8 @@ def test_report_multilayer_works_with_meld(tracker):
     assert "w:1" in tracker.test
 
     assert len(tracker.test["idx"]) == 2
-    assert torch.allclose(tracker.test["w:0"], w0)
-    assert torch.allclose(tracker.test["w:1"], w1)
+    np.testing.assert_allclose(tracker.test["w:0"], w0)
+    np.testing.assert_allclose(tracker.test["w:1"], w1)
 
 
 def test_finalize_does_not_average_over_entries_with_same_idx(tracker):
@@ -292,7 +324,7 @@ def test_accumulate_followed_by_report_accumulated_averages(tracker):
     tracker.finalize()
 
     assert len(tracker.test["x"]) == 1
-    assert torch.allclose(tracker.test["x"][-1], x.mean(dim=0))
+    np.testing.assert_allclose(tracker.test["x"][-1], x.mean(dim=0))
 
 
 def test_accumulate_followed_by_report_accumulated_uses_correct_idx(tracker):
@@ -318,7 +350,7 @@ def test_report_accumulated_resets_accumulator(tracker):
 
     tracker.finalize()
 
-    assert pytest.approx(tracker.test["x"][-1].item()) == xs[1]
+    assert pytest.approx(tracker.test["x"][-1]) == xs[1]
 
 
 def test_report_iterable_of_non_tensors(tracker):
@@ -343,7 +375,16 @@ def test_calculate_accumulated(tracker):
         tracker.test.accumulate("x", value)
     mean = tracker.test.calculate_accumulated("x")
 
-    assert pytest.approx(mean.item()) == sum(values) / len(values)
+    assert pytest.approx(mean) == np.mean(values)
+
+
+def test_calculate_accumulated_has_the_right_dimensions(tracker):
+    values = [np.array([5.0, -0.3]), np.array([2.5, 0.7])]
+    for value in values:
+        tracker.test.accumulate("x", value)
+    mean = tracker.test.calculate_accumulated("x")
+
+    assert mean.shape == values[0].shape
 
 
 def test_calculate_accumulated_does_not_clear_accumulator(tracker):
@@ -352,20 +393,20 @@ def test_calculate_accumulated_does_not_clear_accumulator(tracker):
     assert pytest.approx(tracker.test.calculate_accumulated("x").item()) == values[0]
 
     tracker.test.accumulate("x", values[1])
-    accum_val = tracker.test.calculate_accumulated("x").item()
+    accum_val = tracker.test.calculate_accumulated("x")
     assert pytest.approx(accum_val) != values[1]
-    assert pytest.approx(accum_val) == sum(values) / len(values)
+    assert pytest.approx(accum_val) == np.mean(values)
 
 
 def test_calculate_accumulated_returns_nan_if_empty_dict(tracker):
     a = tracker.test.calculate_accumulated("x")
-    assert torch.isnan(a)
+    assert np.isnan(a)
 
 
 def test_calculate_accumulated_returns_nan_if_empty_field(tracker):
     tracker.test.accumulate("y", 0)
     a = tracker.test.calculate_accumulated("x")
-    assert torch.isnan(a)
+    assert np.isnan(a)
 
 
 def test_report_accumulated_creates_empty_dict_if_accumulator_dict_empty(tracker):

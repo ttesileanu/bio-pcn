@@ -1,7 +1,8 @@
-"""Define a class to track model tensors."""
+"""Define a class to track model (torch) tensors and/or (numpy) arrays."""
 
 
 import torch
+import numpy as np
 
 from types import SimpleNamespace
 from typing import Union, Iterable, Callable
@@ -10,7 +11,7 @@ from typing import Union, Iterable, Callable
 def _dispatch_values(
     reporter: Callable,
     field: Union[str, dict],
-    value: Union[None, int, float, Iterable, torch.Tensor] = None,
+    value: Union[None, int, float, Iterable, torch.Tensor, np.ndarray] = None,
     **kwargs,
 ):
     """Pass values to a reporter, handling lists or tensors, as well as dicts for
@@ -25,14 +26,16 @@ def _dispatch_values(
         return
 
     if not torch.is_tensor(value):
-        if hasattr(value, "__iter__"):
+        if isinstance(value, np.ndarray):
+            value = np.copy(value)
+        elif hasattr(value, "__iter__"):
             for i, sub_value in enumerate(value):
                 _dispatch_values(reporter, f"{field}:{i}", sub_value, **kwargs)
             return
         else:
-            value = torch.tensor(value)
+            value = np.array(value)
     else:
-        value = value.detach().cpu().clone()
+        value = value.detach().cpu().clone().numpy()
 
     reporter(field, value, **kwargs)
 
@@ -63,7 +66,7 @@ class _Reporter:
             setattr(self.tracker._accumulator, self.name, {})
         _dispatch_values(self._accumulate, *args, **kwargs)
 
-    def calculate_accumulated(self, field: str) -> torch.Tensor:
+    def calculate_accumulated(self, field: str) -> np.ndarray:
         """Average all accumulated values for a given field."""
         # make an accumulator field, if it does not exist
         if not hasattr(self.tracker._accumulator, self.name):
@@ -71,9 +74,9 @@ class _Reporter:
         accumulator = getattr(self.tracker._accumulator, self.name)
         if field in accumulator:
             values = accumulator[field]
-            mean_value = torch.cat(values).mean(dim=0)
+            mean_value = np.mean(values, axis=0)
         else:
-            mean_value = torch.tensor(torch.nan)
+            mean_value = np.nan
         return mean_value
 
     def report_accumulated(self, idx: int):
@@ -92,13 +95,13 @@ class _Reporter:
     def _report(
         self,
         field: Union[str, dict],
-        value: Union[None, int, float, Iterable, torch.Tensor] = None,
+        value: Union[None, int, float, Iterable, torch.Tensor, np.ndarray] = None,
         idx: int = None,
         meld: bool = False,
     ):
         assert idx is not None
         if not meld:
-            value.unsqueeze_(0)
+            value = np.expand_dims(value, axis=0)
 
         index_name = self.tracker.index_name
         target = getattr(self.tracker.history, self.name)
@@ -112,14 +115,14 @@ class _Reporter:
         if len(target[field]) not in [len(idxs), len(idxs) - 1]:
             raise IndexError(f"Tracker: mismatched number of reports in {self.name}")
 
-        crt_idxs = torch.LongTensor(len(value) * [idx])
+        crt_idxs = np.repeat(idx, len(value))
         if len(target[field]) == len(idxs):
             # add new index entry
             idxs.append(crt_idxs)
         else:
             # the index entry was already added
             # make sure the index is compatible with what we had before
-            if len(crt_idxs) != len(idxs[-1]) or torch.any(crt_idxs != idxs[-1]):
+            if not np.array_equal(crt_idxs, idxs[-1]):
                 raise IndexError(f"Tracker: mismatched index values in {self.name}")
 
         # add new history entry
@@ -128,17 +131,17 @@ class _Reporter:
     def _accumulate(
         self,
         field: Union[str, dict],
-        value: Union[None, int, float, Iterable, torch.Tensor] = None,
+        value: Union[None, int, float, Iterable, torch.Tensor, np.ndarray] = None,
     ):
         target = getattr(self.tracker._accumulator, self.name)
         if field not in target:
             target[field] = []
 
-        target[field].append(value.unsqueeze(0))
+        target[field].append(value)
 
 
 class Tracker:
-    """Tracker for tensor and list-of-tensor values.
+    """Tracker for tensor/array and list-of-tensor/array values.
     
     Call as
         tracker.test.report(idx, "field", value)
@@ -146,7 +149,8 @@ class Tracker:
     values can be accessed after `tracker.finalize()` is called, simply by indexing the
     appropriate namespace:
         tracker.test["field"]
-    The same values are also available in the `self.history` namespace.
+    All values will be converted to Numpy arrays for storage. The same values are also
+    available in the `self.history` namespace.
 
     The `report` function adds the `value` to the `"field"`, and makes sure a
     corresponding index `idx` is present in`tracker.test["idx"]`. If there is a value
@@ -156,25 +160,26 @@ class Tracker:
     Dictionary names can be any valid Python variable name, except for those that are
     already attributes or methods of `Tracker`; see below.
 
-    If `value` is a `Tensor`, it is added as-is. If it is an iterable other than
-    `Tensor`, it is considered a "layered" variable. An entry is recorded for each of
-    its elements, with field name generated by adding `":{layer}"` to `"field"`. Note
-    that therefore there is a big difference in behavior between reporting the 2d tensor
+    If `value` is a `np.ndarray`, a copy is added as-is; if it is a `torch.tensor`, it
+    is converted to Numpy, then added. If it is an iterable other than tensor or array,
+    it's considered a "layered" variable. An entry is recorded for each of its elements,
+    with field name generated by adding `":{layer}"` to `"field"`. Note that therefore
+    there is a big difference in behavior between reporting the 2d tensor
         torch.FloatTensor([[1.0, 2.0, 3.0]])
-    and reporting the list with one tensor entry
+    and reporting the list with one 1d tensor entry
         [torch.FloatTensor([1.0, 2.0, 3.0])] .
 
     Multiple values can be recorded at once by using a `dict` for the first argument:
-        tracker.test.report(idx=1, {"foo": 2, "bar": 3})
+        tracker.test.report(1, {"foo": 2, "bar": 3})
 
     There is a way to submit several entries for the same index, which can be useful if
     we wish to, e.g., store a batch of results. This can be achieved by using the `meld`
     argument to `report`:
         tracker.test.report(idx, "field", value, meld=True)
-    If `value` is a tensor, a new entry is generated for each row in `value`. If it is a
-    different iterable, then the same is done *per layer*. This will generate as many
-    entries as the length of the tensors. The constraint here is that, if we store more
-    than one field per namespace, all have to have the same batch size.
+    If `value` is a tensor or array, a new entry is generated for each row in `value`.
+    If it is a different iterable, then the same is done *per layer*. This will generate
+    as many entries as the length of the tensors/arrays. The constraint here is that, if
+    we store more than one field per namespace, all have to have the same batch size.
 
     Finally, you can accumulate values and then report a summary of the accumulated
     values using the following syntax:
@@ -205,13 +210,13 @@ class Tracker:
         self._accumulator = SimpleNamespace()
 
     def finalize(self):
-        """Finalize recording, coalesce history into coherent tensors."""
+        """Finalize recording, coalescing history into coherent arrays."""
         for field in self.history.__dict__:
             target = getattr(self.history, field)
 
             # coalesce
             for key in target:
-                target[key] = torch.cat(target[key])
+                target[key] = np.concatenate(target[key])
 
         self.finalized = True
 
