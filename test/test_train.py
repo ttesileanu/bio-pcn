@@ -230,10 +230,6 @@ def test_trainer_history_is_shared_with_tracker_history(trainer):
     assert trainer.tracker.history is trainer.history
 
 
-def test_tracker_index_name_is_batch(trainer):
-    assert trainer.tracker.index_name == "batch"
-
-
 def test_report_fills_in_batch(trainer):
     for batch in trainer(3):
         batch.test.report("foo", 2.0)
@@ -537,3 +533,58 @@ def test_custom_metric_stores_values(trainer, field, val_loader):
     auto_dict = getattr(trainer.history, field)
     test_dict = getattr(trainer.history, "test_" + field)
     np.testing.assert_allclose(auto_dict["custom"], test_dict["custom"])
+
+
+@pytest.fixture()
+def trainer_with_meld() -> SimpleNamespace:
+    trainer = Trainer(generate_loader())
+    net = Mock()
+    net.pc_loss.return_value = torch.tensor(0.0)
+
+    x, y = next(iter(trainer.loader))
+    a = x.clone()
+    b = torch.hstack((x.clone(), y.clone()))
+    net.relax.return_value = SimpleNamespace(z=[a, b])
+
+    n = 3
+    for batch in trainer(n):
+        ns = batch.feed(net)
+        batch.latent.report_batch("z", ns.fast.z)
+
+    return SimpleNamespace(trainer=trainer, a=a, b=b, n=n)
+
+
+def test_trainer_report_batch_reports_correct_batches(trainer_with_meld):
+    history = trainer_with_meld.trainer.history
+    k = len(trainer_with_meld.a)
+    n = trainer_with_meld.n
+
+    expected_batch = np.repeat(np.arange(n), k)
+    np.testing.assert_equal(history.latent["batch"], expected_batch)
+
+
+def test_trainer_report_batch_reports_correct_samples(trainer_with_meld):
+    history = trainer_with_meld.trainer.history
+    k = len(trainer_with_meld.a)
+    n = trainer_with_meld.n
+
+    expected_sample = np.arange(n * k)
+    np.testing.assert_equal(history.latent["sample"], expected_sample)
+
+
+def test_trainer_report_batch_reports_correct_z0(trainer_with_meld):
+    history = trainer_with_meld.trainer.history
+    a = trainer_with_meld.a
+    n = trainer_with_meld.n
+
+    expected_z0 = np.vstack(n * [a.numpy()])
+    np.testing.assert_allclose(history.latent["z:0"], expected_z0)
+
+
+def test_trainer_report_batch_reports_correct_z1(trainer_with_meld):
+    history = trainer_with_meld.trainer.history
+    b = trainer_with_meld.b
+    n = trainer_with_meld.n
+
+    expected_z1 = np.vstack(n * [b.numpy()])
+    np.testing.assert_allclose(history.latent["z:1"], expected_z1)

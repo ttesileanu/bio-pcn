@@ -103,29 +103,13 @@ class _BatchReporter:
         self._tracker = self._batch._tracker
 
     def report(self, *args, **kwargs):
+        if kwargs.pop("check_invalid", False):
+            self._report_invalid(*args, **kwargs)
+
         idx = self._batch.idx
         sample_idx = self._batch.sample_idx
-
-        if kwargs.pop("check_invalid", False):
-            invalid_action = self._batch._trainer.invalid_action
-            if invalid_action != "none":
-                valid = _check_valid(*args, **kwargs)
-                if not valid:
-                    if invalid_action in ["stop", "raise", "warn+stop"]:
-                        self._batch.terminate(
-                            divergence_error=invalid_action == "raise"
-                        )
-                    if invalid_action in ["warn", "warn+stop"]:
-                        msg = f"divergence at batch {idx}, sample {sample_idx}"
-                        warnings.warn(msg, DivergenceWarning)
-
         reporter = getattr(self._tracker, self._name)
-        reporter.report(idx, *args, **kwargs)
-
-        target_dict = getattr(self._tracker.history, self._name)
-        n = len(target_dict["batch"][-1])
-
-        reporter.report(idx, "sample", sample_idx + np.arange(n), meld=True)
+        reporter.report((idx, sample_idx), *args, **kwargs)
 
     def accumulate(self, *args, **kwargs):
         reporter = getattr(self._tracker, self._name)
@@ -133,16 +117,34 @@ class _BatchReporter:
 
     def report_accumulated(self, *args, **kwargs):
         idx = self._batch.idx
-        reporter = getattr(self._tracker, self._name)
-        reporter.report_accumulated(idx)
-
         sample_idx = self._batch.sample_idx
-        target_dict = getattr(self._tracker.history, self._name)
 
-        if "batch" in target_dict:
-            # if it is not present, it means the accumulator was empty
-            n = len(target_dict["batch"][-1])
-            reporter.report(idx, "sample", sample_idx + np.arange(n), meld=True)
+        reporter = getattr(self._tracker, self._name)
+        reporter.report_accumulated((idx, sample_idx), *args, **kwargs)
+
+    def report_batch(self, *args, **kwargs):
+        if kwargs.pop("check_invalid", False):
+            self._report_invalid(*args, **kwargs)
+
+        batch_size = len(self._batch)
+
+        idx = self._batch.idx
+        sample_idxs = self._batch.sample_idx + np.arange(batch_size)
+        reporter = getattr(self._tracker, self._name)
+        reporter.report((idx, sample_idxs), *args, meld=True, **kwargs)
+
+    def _report_invalid(self, *args, **kwargs):
+        invalid_action = self._batch._trainer.invalid_action
+        if invalid_action != "none":
+            valid = _check_valid(*args, **kwargs)
+            if not valid:
+                if invalid_action in ["stop", "raise", "warn+stop"]:
+                    self._batch.terminate(divergence_error=invalid_action == "raise")
+                if invalid_action in ["warn", "warn+stop"]:
+                    idx = self._batch.idx
+                    sample_idx = self._batch.sample_idx
+                    msg = f"divergence at batch {idx}, sample {sample_idx}"
+                    warnings.warn(msg, DivergenceWarning)
 
 
 class TrainingBatch(Batch):
@@ -156,6 +158,14 @@ class TrainingBatch(Batch):
     reports the network's first `W` tensor inside the `weight` dictionary under the name
     `"W"`. `batch.report` automatically assigns `batch` index and `sample` index to the
     reported value.
+
+    Batches of results -- one for each sample -- can be reported using `report_batch`:
+        batch.latent.report_batch("z", net.z)
+    The number of samples in the reported values must match the numer of samples in the
+    value being reported. Note that this is similar to `report` with `meld = True`,
+    except the sample indices will be stored appropriately (increasing for each sample),
+    whereas `report(..., meld=True)` will assign the same sample index to the entire
+    batch.
 
     A check for invalid values can be done automatically like this:
         batch.score.report("L", some_loss(net), check_invalid=True)
@@ -473,7 +483,7 @@ class Trainer:
             "raise":        raise `DivergenceError`
         """
         self.loader = loader
-        self.tracker = Tracker(index_name="batch")
+        self.tracker = Tracker(index_name=("batch", "sample"))
         self.history = self.tracker.history
         self.invalid_action = invalid_action
         self.metrics = {"pc_loss": lambda ns, net: net.pc_loss(ns.fast.z).item()}
