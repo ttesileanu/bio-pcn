@@ -1456,3 +1456,15 @@ def test_forward_last_layer_output_uses_wa(net):
     mu = net.W_a[-1] @ f(z[-2]) + net.h_a[-1]
 
     assert torch.allclose(z[-1], mu)
+
+
+def test_relax_returns_y_pred_equal(net, data):
+    ns = net.relax(data.x, data.y)
+    assert hasattr(ns, "y_pred")
+
+
+def test_relax_y_pred_equal_to_last_layer_from_forward(net, data):
+    fwd_z = net.forward(data.x)
+    ns = net.relax(data.x, data.y)
+
+    assert torch.allclose(ns.y_pred, fwd_z[-1])

@@ -191,11 +191,13 @@ class BioPCN:
             layer, of shape `[n_it, batch_size, n_units]`; note that this output will
             always have a batch index, even if the input and output samples do not
         :return: namespace with results; this always contains the final layer currents
-            and activations, in lists called `a`, `b`, `n`, and `z`; unlike in the case
-            of the profile, these final values obey the batch conventions from `x` and
-            `y`: i.e., they only have a batch index if `x` and `y` do; the returned
-            namespace also contains a `profile` member, which is either empty, or
-            populated as described above when discussing the `..._profile` arguments;
+            and activations, in lists called `a`, `b`, `n`, and `z`, and a prediction,
+            `y_pred`, which is the same as the last-layer activation `z[-1]` from
+            `self.forward()`; unlike in the case of the profile, these final values obey
+            the batch conventions from `x` and `y`: i.e., they only have a batch index
+            if `x` and `y` do; the returned namespace also contains a `profile` member,
+            which is either empty, or populated as described above when discussing the
+            `..._profile` arguments;
         """
         assert x.ndim == y.ndim
         if x.ndim > 1:
@@ -205,6 +207,7 @@ class BioPCN:
         with torch.no_grad():
             # start with a simple forward pass to initialize the layer values
             z = self.forward(x)
+            y_pred = z[-1].clone()
 
             # fix the output layer values
             z[-1] = y.detach()
@@ -250,7 +253,7 @@ class BioPCN:
                         latent.b[k][i, :, :] = b[k]
                         latent.n[k][i, :, :] = n[k]
 
-        ns = SimpleNamespace(z=z, a=a, b=b, n=n)
+        ns = SimpleNamespace(z=z, a=a, b=b, n=n, y_pred=y_pred)
         if latent_profile:
             ns.profile = latent
         else:
