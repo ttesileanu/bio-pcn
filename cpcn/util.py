@@ -2,12 +2,10 @@
 
 import torch
 import torchvision
-import numpy as np
 
 import pandas as pd
 
-from types import SimpleNamespace
-from typing import Optional, Callable, Iterable, Union, Sequence
+from typing import Optional, Union, Sequence
 
 
 def make_onehot(y) -> torch.Tensor:
