@@ -1340,3 +1340,15 @@ def test_clone_nontrivial_interneuron_dims(net_inter_dims):
 
     for param1, param2 in zip(net.parameters(), net_clone.parameters()):
         assert torch.allclose(param1, param2)
+
+
+def test_relax_returns_y_pred_equal(net, data):
+    ns = net.relax(data.x, data.y)
+    assert hasattr(ns, "y_pred")
+
+
+def test_relax_y_pred_equal_to_last_layer_from_forward(net, data):
+    fwd_z = net.forward(data.x)
+    ns = net.relax(data.x, data.y)
+
+    assert torch.allclose(ns.y_pred, fwd_z[-1])
