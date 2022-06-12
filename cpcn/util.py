@@ -260,25 +260,6 @@ def load_csv(
     return dataset
 
 
-def hierarchical_get(obj, attr: str):
-    """Get an attribute in an object hierarchy.
-    
-    This follows several levels of indirection, as indicated by `"."` symbols in the
-    attribute name.
-
-    :param obj: object to access
-    :param attr: attribute name
-    :return: attribute value
-    """
-    while True:
-        parts = attr.split(".", 1)
-        obj = getattr(obj, parts[0])
-        if len(parts) == 1:
-            return obj
-        else:
-            attr = parts[1]
-
-
 def get_constraint_diagnostics(
     latent: dict, every: int = 10, rho: Union[Sequence, float] = 1.0, var: str = "z"
 ) -> dict:
