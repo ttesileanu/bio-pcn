@@ -1,6 +1,23 @@
 import pytest
 
-from cpcn.util import pretty_size
+import torch
+
+from cpcn.util import pretty_size, make_onehot
+
+
+def test_make_onehot_shape():
+    y = torch.LongTensor([1, 3, 2])
+    y_oh = make_onehot(y)
+
+    assert y_oh.shape == (len(y), 4)
+
+
+def test_make_onehot_output():
+    y = torch.LongTensor([1, 3, 2])
+    exp_y_oh = torch.FloatTensor([[0, 1, 0, 0], [0, 0, 0, 1], [0, 0, 1, 0]])
+    y_oh = make_onehot(y)
+
+    assert torch.allclose(y_oh, exp_y_oh)
 
 
 def test_pretty_size_small():
