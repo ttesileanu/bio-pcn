@@ -1,8 +1,9 @@
+from types import SimpleNamespace
 import pytest
 
 import torch
 
-from cpcn.util import pretty_size, make_onehot
+from cpcn.util import pretty_size, make_onehot, one_hot_accuracy, dot_accuracy
 
 
 def test_make_onehot_shape():
@@ -18,6 +19,35 @@ def test_make_onehot_output():
     y_oh = make_onehot(y)
 
     assert torch.allclose(y_oh, exp_y_oh)
+
+
+def test_one_hot_accuracy():
+    y = torch.FloatTensor([[0.2, -0.1, 1], [1, 0.3, 0.1], [-0.1, 1, 0.1]])
+    y_pred = torch.FloatTensor([[0.3, -0.2, 0.5], [0.8, 0.5, 0.1], [-0.3, -0.4, 0.2]])
+
+    expected_accuracy = (y[0, 2] + y[1, 0] + y[2, 2]) / 3
+
+    ns = SimpleNamespace(y=y, fast=SimpleNamespace(y_pred=y_pred))
+    accuracy = one_hot_accuracy(ns, None)
+
+    assert pytest.approx(accuracy) == expected_accuracy
+
+
+def test_dot_accuracy():
+    y = torch.FloatTensor([[1, 0, 1], [0, -1, 0], [0.5, 0.5, 0.5]])
+    y_pred = torch.FloatTensor([[0.3, -0.2, 0.5], [0.8, 0.5, 0.1], [-0.3, -0.4, 0.2]])
+
+    expected_accuracy = 0
+    for crt_y, crt_y_pred in zip(y, y_pred):
+        crt_y = crt_y / torch.linalg.norm(crt_y)
+        crt_y_pred = crt_y_pred / torch.linalg.norm(crt_y_pred)
+        expected_accuracy += 0.5 * (1 + torch.dot(crt_y, crt_y_pred))
+
+    expected_accuracy /= len(y)
+    ns = SimpleNamespace(y=y, fast=SimpleNamespace(y_pred=y_pred))
+    accuracy = dot_accuracy(ns, None)
+
+    assert pytest.approx(accuracy) == expected_accuracy
 
 
 def test_pretty_size_small():
