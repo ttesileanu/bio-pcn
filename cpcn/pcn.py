@@ -146,11 +146,12 @@ class PCNetwork(object):
             that this output will always have a batch index, even if the input and
             output samples do not
         :return: namespace with results; this always contains the final layer
-            activations, in a list called `z`; it also contains a `profile` member,
-            which is either empty or populated as described above when discussing the
-            `..._profile` arguments; unlike the `latent_profile` described above, the
-            final `z` values obey the batch conventions from `x` and `y`: i.e., they
-            only have a batch index if `x` and `y` do
+            activations, in a list called `z`, and a prediction, `y_pred`, which is the
+            same as the last-layer activation from `self.forward()`; it also contains a
+            `profile` member, which is either empty or populated as described above when
+            discussing the `..._profile` arguments; unlike the `latent_profile`
+            described above, the final `z` values obey the batch conventions from `x` 
+            and `y`: i.e., they only have a batch index if `x` and `y` do
         """
         assert x.ndim == y.ndim
         if x.ndim > 1:
@@ -158,6 +159,7 @@ class PCNetwork(object):
 
         # start with a simple forward pass to initialize the layer values
         z = self.forward(x)
+        y_pred = z[-1].clone()
 
         # fix the output layer values
         z[-1] = y.detach()
@@ -186,7 +188,7 @@ class PCNetwork(object):
                 for k, crt_z in enumerate(z):
                     latent[k][i, :, :] = crt_z
 
-        ns = SimpleNamespace(z=z, profile=SimpleNamespace())
+        ns = SimpleNamespace(z=z, y_pred=y_pred, profile=SimpleNamespace())
         if pc_loss_profile:
             ns.profile.pc_loss = losses
         if latent_profile:
