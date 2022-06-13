@@ -590,13 +590,18 @@ def test_trainer_report_batch_reports_correct_z1(trainer_with_meld):
     np.testing.assert_allclose(history.latent["z:1"], expected_z1)
 
 
-def test_trainer_repr(trainer):
-    s = repr(trainer)
-    s.startswith("Trainer(")
-    s.endswith(")")
+@pytest.mark.parametrize("kind", ["repr", "str"])
+def test_trainer_repr(trainer, kind):
+    s = {"repr": repr, "str": str}[kind](trainer)
+    assert s.startswith("Trainer(")
+    assert s.endswith(")")
 
 
-def test_trainer_str(trainer):
-    s = str(trainer)
-    s.startswith("Trainer(")
-    s.endswith(")")
+@pytest.mark.parametrize("kind", ["repr", "str"])
+def test_eval_iterable_repr(trainer, val_loader, kind):
+    batch = next(iter(trainer(1)))
+    eval_iterable = batch.evaluate(val_loader)
+
+    s = {"repr": repr, "str": str}[kind](eval_iterable)
+    assert s.startswith("EvaluationIterable(")
+    assert s.endswith(")")

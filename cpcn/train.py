@@ -444,6 +444,26 @@ class EvaluationIterable:
     def __len__(self) -> int:
         return len(self.loader)
 
+    def __repr__(self) -> str:
+        s = (
+            f"EvaluationIterable("
+            f"trainer={repr(self.trainer)}, "
+            f"loader={repr(self.loader)}, "
+            f"train_batch={repr(self.train_batch)}"
+            f")"
+        )
+        return s
+
+    def __str__(self) -> str:
+        s = (
+            f"EvaluationIterable("
+            f"trainer={str(self.trainer)}, "
+            f"loader={str(self.loader)}, "
+            f"train_batch={str(self.train_batch)}"
+            f")"
+        )
+        return s
+
 
 class Trainer:
     """Class used to help train predictive-coding networks.
