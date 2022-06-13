@@ -6,7 +6,7 @@ import numpy as np
 
 import warnings
 
-from typing import Iterable, Union
+from typing import Iterable, Union, Callable
 
 from cpcn.track import Tracker
 
@@ -576,3 +576,35 @@ class Trainer:
             f")"
         )
         return s
+
+
+def multi_lr(optim: Callable, parameter_groups: list, lr_factors: dict, **kwargs):
+    """Instantiate an optimizer with different learning rates for different parameter
+    groups.
+
+    If the names in `parameter_groups` are "layered", in the sense that we have the same
+    suffix followed by a colon followed by a layer identifier (e.g., "W:0", "W:1", ...),
+    then all the layers sharing a suffix can be addressed using the suffix alone (e.g.,
+    "W").
+    
+    :param optim: constructor for a learning rate optimizer, e.g., `torch.optim.SGD`
+    :param parameter_groups: list of parameter groups (each a `dict` with keys `"name"`
+        and `"params"`)
+    :param lr_factors: dictionary of learning-rate factors; any parameter group that is
+        not mentioned here is assumed to have a factor of 1
+    :**kwargs: additional keyword arguments passed to `optim()`
+    """
+    # slightly annoying bit: if default learning rate is used, we can't read it from
+    # `kwargs`; so we first create an optimizer with all the relevant groups, but the
+    # same learning rate for all
+    optim_instance = optim(parameter_groups, **kwargs)
+    for param in optim_instance.param_groups:
+        if param["name"] in lr_factors:
+            param["lr"] *= lr_factors[param["name"]]
+        else:
+            # do we have an across-layer factor?
+            for factor_name, factor in lr_factors.items():
+                if param["name"].startswith(f"{factor_name}:"):
+                    param["lr"] *= factor
+
+    return optim_instance

@@ -4,7 +4,7 @@ import pytest
 import torch
 import numpy as np
 
-from cpcn.train import Trainer, DivergenceError, DivergenceWarning
+from cpcn.train import Trainer, DivergenceError, DivergenceWarning, multi_lr
 from cpcn.track import Tracker
 from unittest.mock import Mock
 
@@ -634,3 +634,51 @@ def test_train_batch_repr(trainer, kind):
     s = {"repr": repr, "str": str}[kind](batch)
     assert s.startswith("TrainingBatch(")
     assert s.endswith(")")
+
+
+def test_multi_lr_uses_all_param_groups():
+    param_groups = [
+        {"name": "foo", "params": torch.FloatTensor([2.0])},
+        {"name": "boo", "params": torch.FloatTensor([[3.0, -0.5], [2.0, 0.3]])},
+    ]
+    optim = multi_lr(torch.optim.Adam, param_groups, {})
+
+    assert len(optim.param_groups) == len(param_groups)
+
+    original_names = set(_["name"] for _ in param_groups)
+    optim_names = set(_["name"] for _ in optim.param_groups)
+    assert original_names == optim_names
+
+
+def test_multi_lr_learning_rates_are_correct():
+    param_groups = [
+        {"name": "foo", "params": torch.FloatTensor([2.0])},
+        {"name": "boo", "params": torch.FloatTensor([[3.0, -0.5], [2.0, 0.3]])},
+    ]
+    lr_factors = {"foo": 123, "boo": 0.023}
+    lr = 0.0032
+    optim = multi_lr(torch.optim.SGD, param_groups, lr_factors, lr=lr)
+
+    for param_dict in optim.param_groups:
+        expected_lr = lr * lr_factors[param_dict["name"]]
+        assert pytest.approx(param_dict["lr"]) == expected_lr
+
+
+def test_multi_lr_layered_variable():
+    param_groups = [
+        {"name": "foo:0", "params": torch.FloatTensor([2.0])},
+        {"name": "foo:1", "params": torch.FloatTensor([[3.0, -0.5], [2.0, 0.3]])},
+        {"name": "boo:0", "params": torch.FloatTensor([1.0, 3.0])},
+        {"name": "boo:1", "params": torch.FloatTensor([1.0, -3.0])},
+    ]
+    lr_factors = {"foo": 1.5, "boo:0": 0.7}
+    lr = 0.0032
+    optim = multi_lr(torch.optim.SGD, param_groups, lr_factors, lr=lr)
+
+    for param_dict in optim.param_groups:
+        if param_dict["name"].startswith("foo:"):
+            assert pytest.approx(param_dict["lr"]) == lr * lr_factors["foo"]
+        elif param_dict["name"] == "boo:0":
+            assert pytest.approx(param_dict["lr"]) == lr * lr_factors["boo:0"]
+        else:
+            assert pytest.approx(param_dict["lr"]) == lr
