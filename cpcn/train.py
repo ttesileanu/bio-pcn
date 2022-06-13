@@ -280,6 +280,15 @@ class TrainingBatch(Batch):
     def __getattr__(self, name: str):
         return _BatchReporter(self, name)
 
+    def __repr__(self) -> str:
+        s = (
+            f"TrainingBatch("
+            f"x={self.x}, y={self.y}, "
+            f"idx={self.idx}, n={self.n}, sample_idx={self.sample_idx}"
+            f")"
+        )
+        return s
+
 
 class TrainingIterable:
     """Iterable returned by calling a Trainer, as well as corresponding iterator.

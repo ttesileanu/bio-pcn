@@ -625,3 +625,12 @@ def test_train_iterable_repr(trainer, kind):
     s = {"repr": repr, "str": str}[kind](train_iterable)
     assert s.startswith("TrainingIterable(")
     assert s.endswith(")")
+
+
+@pytest.mark.parametrize("kind", ["repr", "str"])
+def test_train_batch_repr(trainer, val_loader, kind):
+    batch = next(iter(trainer(1)))
+
+    s = {"repr": repr, "str": str}[kind](batch)
+    assert s.startswith("TrainingBatch(")
+    assert s.endswith(")")
