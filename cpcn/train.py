@@ -383,6 +383,18 @@ class EvaluationBatch(Batch):
 
         return ns
 
+    def __repr__(self) -> str:
+        s = (
+            f"EvaluationBatch("
+            f"x={self.x}, y={self.y}, train_batch={repr(self.train_batch)}"
+            f")"
+        )
+        return s
+
+    def __str__(self) -> str:
+        s = f"EvaluationBatch(x={self.x}, y={self.y})"
+        return s
+
 
 class EvaluationIterable:
     """Iterable and corresponding iterator used for evaluation runs.
