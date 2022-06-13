@@ -135,3 +135,25 @@ class PCWrapper:
             pc_net_copy, predictor_copy, dim=self.dim, loss=loss_copy
         )
         return wrapper_copy
+
+    def __repr__(self) -> str:
+        s = (
+            f"PCWrapper("
+            + f"pc_net={repr(self.pc_net)}, "
+            + f"predictor={repr(self.predictor)}, "
+            + f"dim={self.dim}, "
+            + f"loss={repr(self.loss)}"
+            + ")"
+        )
+        return s
+
+    def __str__(self) -> str:
+        s = (
+            f"PCWrapper("
+            + f"pc_net={str(self.pc_net)}, "
+            + f"predictor={str(self.predictor)}, "
+            + f"dim={self.dim}, "
+            + f"loss={str(self.loss)}"
+            + ")"
+        )
+        return s

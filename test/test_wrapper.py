@@ -286,3 +286,17 @@ def test_clone_matches_original_params(mock_net):
 
     for orig_param, clone_param in zip(mock_net.parameters(), clone.parameters()):
         assert torch.allclose(orig_param, clone_param)
+
+
+def test_repr():
+    wrapper = get_wrapped()
+    s = repr(wrapper)
+    assert s.startswith("PCWrapper(")
+    assert s.endswith(")")
+
+
+def test_str():
+    wrapper = get_wrapped()
+    s = str(wrapper)
+    assert s.startswith("PCWrapper(")
+    assert s.endswith(")")
