@@ -262,3 +262,27 @@ def test_eval_calls_predictor_train(mock_net):
     wrapper.eval()
 
     predictor.eval.assert_called()
+
+
+def test_clone_makes_detached_copy(mock_net):
+    mock_net.clone.side_effect = get_mock_net
+    wrapper = PCWrapper(mock_net, "linear-relu")
+    orig_params = [_.detach().clone() for _ in wrapper.parameters()]
+
+    clone = wrapper.clone()
+
+    with torch.no_grad():
+        for param in wrapper.parameters():
+            param.mul_(-1)
+
+    for orig_param, clone_param in zip(orig_params, clone.parameters()):
+        assert torch.allclose(orig_param, clone_param)
+
+
+def test_clone_matches_original_params(mock_net):
+    mock_net.clone.side_effect = get_mock_net
+    wrapper = PCWrapper(mock_net, "linear-relu")
+    clone = wrapper.clone()
+
+    for orig_param, clone_param in zip(mock_net.parameters(), clone.parameters()):
+        assert torch.allclose(orig_param, clone_param)

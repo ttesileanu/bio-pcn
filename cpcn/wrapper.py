@@ -2,6 +2,8 @@
 
 import torch
 
+from copy import deepcopy
+
 from types import SimpleNamespace
 from typing import Union, Callable, Optional
 
@@ -123,3 +125,13 @@ class PCWrapper:
         self.predictor.to(*args, **kwargs)
 
         return self
+
+    def clone(self) -> "PCWrapper":
+        pc_net_copy = self.pc_net.clone()
+        predictor_copy = deepcopy(self.predictor)
+        loss_copy = deepcopy(self.loss)
+
+        wrapper_copy = PCWrapper(
+            pc_net_copy, predictor_copy, dim=self.dim, loss=loss_copy
+        )
+        return wrapper_copy
