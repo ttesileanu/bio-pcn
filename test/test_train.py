@@ -6,7 +6,7 @@ import numpy as np
 
 from cpcn.train import Trainer, DivergenceError, DivergenceWarning
 from cpcn.track import Tracker
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 
 def generate_loader(
