@@ -588,3 +588,15 @@ def test_trainer_report_batch_reports_correct_z1(trainer_with_meld):
 
     expected_z1 = np.vstack(n * [b.numpy()])
     np.testing.assert_allclose(history.latent["z:1"], expected_z1)
+
+
+def test_trainer_repr(trainer):
+    s = repr(trainer)
+    s.startswith("Trainer(")
+    s.endswith(")")
+
+
+def test_trainer_str(trainer):
+    s = str(trainer)
+    s.startswith("Trainer(")
+    s.endswith(")")

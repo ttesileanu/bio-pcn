@@ -494,3 +494,22 @@ class Trainer:
     def __len__(self) -> int:
         """Trainer length equals the length of the loader."""
         return len(self.loader)
+
+    def __repr__(self) -> str:
+        s = (
+            f"Trainer("
+            f"loader={repr(self.loader)}, "
+            f"tracker={repr(self.tracker)}, "
+            f"metrics={repr(self.metrics)}"
+            f")"
+        )
+        return s
+
+    def __str__(self) -> str:
+        s = (
+            f"Trainer("
+            f"loader={str(self.loader)}, "
+            f"metrics={str(self.metrics)}"
+            f")"
+        )
+        return s
