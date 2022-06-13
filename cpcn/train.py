@@ -344,6 +344,28 @@ class TrainingIterable:
     def __len__(self) -> int:
         return self.n_batches
 
+    def __repr__(self) -> str:
+        s = (
+            f"TrainingIterable("
+            f"trainer={repr(self.trainer)}, "
+            f"loader={repr(self.loader)}, "
+            f"n_batches={self.n_batches}, "
+            f"terminating={self.terminating}, "
+            f"divergence={self.divergence}"
+            f")"
+        )
+        return s
+
+    def __str__(self) -> str:
+        s = (
+            f"TrainingIterable("
+            f"trainer={str(self.trainer)}, "
+            f"loader={str(self.loader)}, "
+            f"n_batches={self.n_batches}"
+            f")"
+        )
+        return s
+
 
 class EvaluationBatch(Batch):
     """Handle for one evaluation batch.
