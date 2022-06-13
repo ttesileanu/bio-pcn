@@ -628,7 +628,7 @@ def test_train_iterable_repr(trainer, kind):
 
 
 @pytest.mark.parametrize("kind", ["repr", "str"])
-def test_train_batch_repr(trainer, val_loader, kind):
+def test_train_batch_repr(trainer, kind):
     batch = next(iter(trainer(1)))
 
     s = {"repr": repr, "str": str}[kind](batch)
