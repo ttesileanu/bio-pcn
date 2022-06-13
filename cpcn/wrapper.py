@@ -55,10 +55,13 @@ class PCWrapper:
 
         self.predictor = predictor
 
-    def relax(self, x: torch.Tensor, y: torch.Tensor) -> SimpleNamespace:
+    def relax(self, x: torch.Tensor, y: torch.Tensor, **kwargs) -> SimpleNamespace:
         """Run relax on underlying PC net, then use predictor net to calculate final
-        prediction, storing it as `y_pred` in output namespace."""
-        ns = self.pc_net.relax(x, y)
+        prediction, storing it as `y_pred` in output namespace.
+        
+        Any additional keyword arguments are passed to `self.pc_net.relax`.
+        """
+        ns = self.pc_net.relax(x, y, **kwargs)
 
         pred_input = ns.z[self.dim].detach()
         pred_output = self.predictor(pred_input)
@@ -70,11 +73,16 @@ class PCWrapper:
         """Return PC loss as calculated by PC net."""
         return self.pc_net.pc_loss(z)
 
-    def calculate_weight_grad(self, fast: SimpleNamespace):
+    def calculate_weight_grad(self, fast: SimpleNamespace, **kwargs):
         """Calculate gradients for predictive-coding slow variables and for predictor
         variables.
+
+        Additional arguments are passed to `pc_net.calculate_weight_grad`.
+
+        Note that a `reduction` option given here needs to be matched by an equivalent
+        `reduction` option given to the loss in the constructor `self.__init__`!
         """
-        self.pc_net.calculate_weight_grad(fast)
+        self.pc_net.calculate_weight_grad(fast, **kwargs)
 
         for param in self.predictor.parameters():
             param.grad = None
@@ -98,3 +106,20 @@ class PCWrapper:
         pred_params = self.predictor.parameters()
 
         return pc_param_groups + [{"name": "predictor", "params": pred_params}]
+
+    def train(self):
+        """Set in training mode."""
+        self.pc_net.train()
+        self.predictor.train()
+
+    def eval(self):
+        """Set in evaluation mode."""
+        self.pc_net.eval()
+        self.predictor.eval()
+
+    def to(self, *args, **kwargs):
+        """Moves and/or casts the parameters and buffers."""
+        self.pc_net.to(*args, **kwargs)
+        self.predictor.to(*args, **kwargs)
+
+        return self

@@ -17,7 +17,7 @@ def data() -> tuple:
 
 def get_mock_net():
     net = Mock()
-    net.relax.side_effect = lambda x, y: SimpleNamespace(
+    net.relax.side_effect = lambda x, y, **kwargs: SimpleNamespace(
         z=[torch.ones(len(x), 1), x, torch.linalg.norm(y)]
     )
     net.pc_loss.return_value = torch.tensor(0.0)
@@ -195,3 +195,70 @@ def test_wrapper_passes_along_pc_loss_value(mock_net, data):
     loss = wrapper.pc_loss(ns.z)
 
     assert torch.allclose(loss, ret_val)
+
+
+def test_relax_passes_additional_kwargs_to_pc_net(mock_net, data):
+    wrapper = PCWrapper(mock_net, "linear")
+    wrapper.relax(data.x, data.y, foo="bar")
+
+    assert "foo" in mock_net.relax.call_args[1]
+    assert mock_net.relax.call_args[1]["foo"] == "bar"
+
+
+def test_calculate_weight_grad_passes_additional_kwargs_to_pc_net(mock_net, data):
+    wrapper = PCWrapper(mock_net, "linear")
+    ns = wrapper.relax(data.x, data.y)
+    wrapper.calculate_weight_grad(ns, foo="bar")
+
+    assert "foo" in mock_net.calculate_weight_grad.call_args[1]
+    assert mock_net.calculate_weight_grad.call_args[1]["foo"] == "bar"
+
+
+def test_to_calls_pc_net_to(mock_net):
+    wrapper = PCWrapper(mock_net, "linear")
+    wrapper.to("cpu")
+
+    mock_net.to.assert_called_with("cpu")
+
+
+def test_to_calls_predictor_to(mock_net):
+    predictor = Mock()
+    wrapper = PCWrapper(mock_net, predictor)
+    wrapper.to("cuda")
+
+    predictor.to.assert_called_with("cuda")
+
+
+def test_to_returns_self():
+    wrapper = get_wrapped()
+    assert wrapper.to("cpu") is wrapper
+
+
+def test_train_calls_pc_net_train(mock_net):
+    wrapper = PCWrapper(mock_net, "linear")
+    wrapper.train()
+
+    mock_net.train.assert_called()
+
+
+def test_eval_calls_pc_net_eval(mock_net):
+    wrapper = PCWrapper(mock_net, "linear")
+    wrapper.eval()
+
+    mock_net.eval.assert_called()
+
+
+def test_train_calls_predictor_train(mock_net):
+    predictor = Mock()
+    wrapper = PCWrapper(mock_net, predictor)
+    wrapper.train()
+
+    predictor.train.assert_called()
+
+
+def test_eval_calls_predictor_train(mock_net):
+    predictor = Mock()
+    wrapper = PCWrapper(mock_net, predictor)
+    wrapper.eval()
+
+    predictor.eval.assert_called()
