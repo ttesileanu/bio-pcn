@@ -484,8 +484,28 @@ class EvaluationIterable:
         except StopIteration:
             self.train_batch.validation.report_accumulated()
             self.train_batch.train.report_accumulated()
+
+            self._check_invalid()
             raise StopIteration
         return EvaluationBatch(x=x, y=y, train_batch=self.train_batch)
+
+    def _check_invalid(self):
+        to_check = self.trainer.check_invalid
+        if isinstance(to_check, bool):
+            if to_check:
+                to_check = self.trainer.metrics.keys()
+            else:
+                to_check = []
+        for metric in self.trainer.metrics:
+            if metric in to_check:
+                for field in ["train", "validation"]:
+                    # need a try here in case some of the histories are empty
+                    try:
+                        values = getattr(self.trainer.history, field)[metric]
+                        value = values[-1]
+                        getattr(self.train_batch, field)._report_invalid(metric, value)
+                    except:
+                        pass
 
     def run(self, net):
         """Run a full validation run.
@@ -545,9 +565,19 @@ class Trainer:
             metric(ns, net) -> float
         where `ns` is the output from `batch.feed` and `net` is the network that is
         being trained.
+    :param invalid_action: action to take in case a check for invalid values fails; see
+        `__init__` for details
+    :param check_invalid: list of metrics for which to check for invalid values, if
+        `invalid_action` is different from `"none"`; checks are performed after every
+        evaluation run; can be `True` to check all metrics
     """
 
-    def __init__(self, loader: Iterable, invalid_action: str = "none"):
+    def __init__(
+        self,
+        loader: Iterable,
+        invalid_action: str = "none",
+        check_invalid: Union[Iterable[str], bool] = True,
+    ):
         """Initialize trainer.
         
         :param loader: iterable of `(input, output)` tuples
@@ -557,6 +587,9 @@ class Trainer:
             "warn":         print a warning and continue
             "warn+stop":    print a warning and stop
             "raise":        raise `DivergenceError`
+        :param check_invalid: list of metrics for which to check for invalid values, if
+            `invalid_action` is different from `"none"`; checks are performed after
+            every evaluation run; can be `True` to check all metrics
         """
         self.loader = loader
         self.tracker = Tracker(index_name=("batch", "sample", "epoch"))
@@ -566,6 +599,7 @@ class Trainer:
             "pc_loss": lambda ns, net: net.pc_loss(ns.fast.z).item(),
             "prediction_error": _prediction_error,
         }
+        self.check_invalid = check_invalid
 
     def __call__(self, n_batches: int) -> TrainingIterable:
         return TrainingIterable(self, n_batches)

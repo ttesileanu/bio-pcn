@@ -743,3 +743,34 @@ def test_prediction_error_defined_correctly(trainer):
     expected = torch.mean((y - y_pred) ** 2).item()
 
     assert pytest.approx(pred_err) == expected
+
+
+def test_check_invalid_for_metrics_is_true_by_default(trainer, mock_net, val_loader):
+    trainer.invalid_action = "raise"
+    mock_net.pc_loss.return_value = torch.tensor(torch.inf)
+
+    with pytest.raises(DivergenceError):
+        for batch in trainer(3):
+            batch.feed(mock_net)
+            batch.evaluate(val_loader).run(mock_net)
+
+
+def test_stopping_only_for_metrics_in_check_invalid(trainer, mock_net, val_loader):
+    trainer.check_invalid = ["prediction_error"]
+    trainer.invalid_action = "raise"
+    mock_net.pc_loss.return_value = torch.tensor(torch.inf)
+
+    for batch in trainer(3):
+        batch.feed(mock_net)
+        batch.evaluate(val_loader).run(mock_net)
+
+
+def test_check_invalid_as_list(trainer, mock_net, val_loader):
+    trainer.check_invalid = ["pc_loss"]
+    trainer.invalid_action = "raise"
+    mock_net.pc_loss.return_value = torch.tensor(torch.inf)
+
+    with pytest.raises(DivergenceError):
+        for batch in trainer(3):
+            batch.feed(mock_net)
+            batch.evaluate(val_loader).run(mock_net)
