@@ -682,3 +682,14 @@ def test_multi_lr_layered_variable():
             assert pytest.approx(param_dict["lr"]) == lr * lr_factors["boo:0"]
         else:
             assert pytest.approx(param_dict["lr"]) == lr
+
+
+def test_batch_epoch(trainer):
+    n = len(trainer)
+    k = 3
+    epochs = []
+    for batch in trainer(k * n):
+        epochs.append(batch.epoch)
+
+    expected = np.repeat(np.arange(k), n)
+    np.testing.assert_equal(expected, epochs)

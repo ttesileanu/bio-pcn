@@ -193,6 +193,7 @@ class TrainingBatch(Batch):
     :param idx: batch index
     :param sample_idx: sample index for the start of the batch
     :param n: total number of training batches in the run
+    :param epoch: current "epoch" (how many times the dataset was traversed)
     :param tracker: object used for monitoring values
     :param report: tool used to monitor values
     """
@@ -204,6 +205,7 @@ class TrainingBatch(Batch):
         idx: int,
         n: int,
         sample_idx: int,
+        epoch: int,
         iterator: "TrainingIterable",
     ):
         super().__init__(x, y)
@@ -211,6 +213,7 @@ class TrainingBatch(Batch):
         self.idx = idx
         self.n = n
         self.sample_idx = sample_idx
+        self.epoch = epoch
 
         self._trainer = iterator.trainer
         self._tracker = self._trainer.tracker
@@ -284,8 +287,8 @@ class TrainingBatch(Batch):
         s = (
             f"TrainingBatch("
             f"x={self.x}, y={self.y}, "
-            f"idx={self.idx}, n={self.n}, sample_idx={self.sample_idx}"
-            f")"
+            f"idx={self.idx}, n={self.n}, sample_idx={self.sample_idx}, "
+            f"epoch={self.epoch})"
         )
         return s
 
@@ -317,6 +320,7 @@ class TrainingIterable:
 
         self._i = 0
         self._sample = 0
+        self._epoch = 0
         self._it = iter(self.loader)
         return self
 
@@ -327,6 +331,7 @@ class TrainingIterable:
             except StopIteration:
                 self._it = iter(self.loader)
                 x, y = next(self._it)
+                self._epoch += 1
 
             batch = TrainingBatch(
                 x=x,
@@ -334,6 +339,7 @@ class TrainingIterable:
                 idx=self._i,
                 n=self.n_batches,
                 sample_idx=self._sample,
+                epoch=self._epoch,
                 iterator=self,
             )
             self._i += 1
