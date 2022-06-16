@@ -108,8 +108,9 @@ class _BatchReporter:
 
         idx = self._batch.idx
         sample_idx = self._batch.sample_idx
+        epoch = self._batch.epoch
         reporter = getattr(self._tracker, self._name)
-        reporter.report((idx, sample_idx), *args, **kwargs)
+        reporter.report((idx, sample_idx, epoch), *args, **kwargs)
 
     def accumulate(self, *args, **kwargs):
         reporter = getattr(self._tracker, self._name)
@@ -118,9 +119,10 @@ class _BatchReporter:
     def report_accumulated(self, *args, **kwargs):
         idx = self._batch.idx
         sample_idx = self._batch.sample_idx
+        epoch = self._batch.epoch
 
         reporter = getattr(self._tracker, self._name)
-        reporter.report_accumulated((idx, sample_idx), *args, **kwargs)
+        reporter.report_accumulated((idx, sample_idx, epoch), *args, **kwargs)
 
     def report_batch(self, *args, **kwargs):
         if kwargs.pop("check_invalid", False):
@@ -129,9 +131,10 @@ class _BatchReporter:
         batch_size = len(self._batch)
 
         idx = self._batch.idx
+        epoch = self._batch.epoch
         sample_idxs = self._batch.sample_idx + np.arange(batch_size)
         reporter = getattr(self._tracker, self._name)
-        reporter.report((idx, sample_idxs), *args, meld=True, **kwargs)
+        reporter.report((idx, sample_idxs, epoch), *args, meld=True, **kwargs)
 
     def _report_invalid(self, *args, **kwargs):
         invalid_action = self._batch._trainer.invalid_action
@@ -552,7 +555,7 @@ class Trainer:
             "raise":        raise `DivergenceError`
         """
         self.loader = loader
-        self.tracker = Tracker(index_name=("batch", "sample"))
+        self.tracker = Tracker(index_name=("batch", "sample", "epoch"))
         self.history = self.tracker.history
         self.invalid_action = invalid_action
         self.metrics = {"pc_loss": lambda ns, net: net.pc_loss(ns.fast.z).item()}

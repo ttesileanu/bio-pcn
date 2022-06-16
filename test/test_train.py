@@ -693,3 +693,35 @@ def test_batch_epoch(trainer):
 
     expected = np.repeat(np.arange(k), n)
     np.testing.assert_equal(expected, epochs)
+
+
+def test_report_fills_in_epoch(trainer):
+    n = len(trainer)
+    k = 2
+    for batch in trainer(k * n):
+        batch.test.report("foo", 2.0)
+
+    assert hasattr(trainer.history, "test")
+    assert "epoch" in trainer.history.test
+    assert len(trainer.history.test["epoch"]) == k * n
+    np.testing.assert_equal(trainer.history.test["epoch"], np.repeat(np.arange(k), n))
+
+
+def test_trainer_report_batch_reports_correct_epochs(trainer):
+    net = Mock()
+    net.pc_loss.return_value = torch.tensor(0.0)
+
+    x, y = next(iter(trainer.loader))
+    a = x.clone()
+    b = torch.hstack((x.clone(), y.clone()))
+    net.relax.return_value = SimpleNamespace(z=[a, b])
+
+    n = len(trainer)
+    k = 3
+    for batch in trainer(k * n):
+        ns = batch.feed(net)
+        batch.latent.report_batch("z", ns.fast.z)
+
+    m = len(a)
+    expected_epoch = np.repeat(np.arange(k), n * m)
+    np.testing.assert_equal(trainer.history.latent["epoch"], expected_epoch)
