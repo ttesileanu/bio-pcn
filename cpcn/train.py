@@ -316,6 +316,7 @@ class TrainingIterable:
         self._it = None
         self._i = 0
         self._sample = 0
+        self._epoch = 0
 
     def __iter__(self) -> "TrainingIterable":
         self.terminating = False
