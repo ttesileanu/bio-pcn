@@ -38,7 +38,9 @@ def val_loader_one():
 @pytest.fixture
 def mock_net():
     net = Mock()
-    net.relax.return_value = SimpleNamespace(z=[torch.FloatTensor([0.0])])
+    net.relax.return_value = SimpleNamespace(
+        z=[torch.FloatTensor([0.0])], y_pred=torch.FloatTensor([0.0])
+    )
     net.pc_loss.return_value = torch.tensor(0.0)
 
     return net
@@ -116,7 +118,7 @@ def test_batch_feed_sends_other_kwargs_to_net_relax(trainer, mock_net):
 
 
 def test_batch_feed_return_contains_results_from_relax_in_fast(trainer, mock_net):
-    ret_val = SimpleNamespace(z=[], foo="test")
+    ret_val = SimpleNamespace(z=[], foo="test", y_pred=torch.FloatTensor([0.0]))
     mock_net.relax.return_value = ret_val
     for batch in trainer(1):
         ns = batch.feed(mock_net)
@@ -193,7 +195,7 @@ def test_evaluate_batch_feed_sends_other_kwargs_to_net_relax(
 def test_evaluate_batch_feed_return_contains_results_from_relax_in_fast(
     trainer, val_loader_one, mock_net
 ):
-    ret_val = SimpleNamespace(z=[], foo="test")
+    ret_val = SimpleNamespace(z=[], foo="test", y_pred=torch.FloatTensor([0.0]))
     mock_net.relax.return_value = ret_val
     train_batch = next(iter(trainer(1)))
     for batch in train_batch.evaluate(val_loader_one):
@@ -476,10 +478,10 @@ def test_metrics_contains_pc_loss_by_default(trainer):
     assert "pc_loss" in trainer.metrics
 
 
-def test_removing_pc_loss_from_metrics_removes_default_reporting(
+def test_removing_everything_from_metrics_removes_default_reporting(
     trainer, mock_net, val_loader
 ):
-    trainer.metrics.pop("pc_loss")
+    trainer.metrics.clear()
     for batch in trainer(10):
         batch.feed(mock_net)
         if batch.every(3):
@@ -544,7 +546,7 @@ def trainer_with_meld() -> SimpleNamespace:
     x, y = next(iter(trainer.loader))
     a = x.clone()
     b = torch.hstack((x.clone(), y.clone()))
-    net.relax.return_value = SimpleNamespace(z=[a, b])
+    net.relax.return_value = SimpleNamespace(z=[a, b], y_pred=torch.FloatTensor([0.0]))
 
     n = 3
     for batch in trainer(n):
@@ -714,7 +716,7 @@ def test_trainer_report_batch_reports_correct_epochs(trainer):
     x, y = next(iter(trainer.loader))
     a = x.clone()
     b = torch.hstack((x.clone(), y.clone()))
-    net.relax.return_value = SimpleNamespace(z=[a, b])
+    net.relax.return_value = SimpleNamespace(z=[a, b], y_pred=torch.FloatTensor([0.0]))
 
     n = len(trainer)
     k = 3
@@ -725,3 +727,19 @@ def test_trainer_report_batch_reports_correct_epochs(trainer):
     m = len(a)
     expected_epoch = np.repeat(np.arange(k), n * m)
     np.testing.assert_equal(trainer.history.latent["epoch"], expected_epoch)
+
+
+def test_prediction_error_is_among_default_metrics(trainer):
+    assert "prediction_error" in trainer.metrics
+
+
+def test_prediction_error_defined_correctly(trainer):
+    y = torch.FloatTensor([[-0.5, 0.3], [0.7, 0.8]])
+    y_pred = torch.FloatTensor([[0.2, 0.1], [-0.4, 0.5]])
+
+    ns = SimpleNamespace(y=y, fast=SimpleNamespace(y_pred=y_pred))
+    pred_err = trainer.metrics["prediction_error"](ns, None)
+
+    expected = torch.mean((y - y_pred) ** 2).item()
+
+    assert pytest.approx(pred_err) == expected

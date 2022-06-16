@@ -187,6 +187,9 @@ class TrainingBatch(Batch):
     entry of the average metric is made in `history.train` every time an evaluation run
     ends (i.e., an evaluation iterator is used until the end).
 
+    Another default metric is `prediction_error`, which is the mean-squared error
+    difference between the `y_pred` value from `net.relax()` and the ground-truth `y`.
+
     Adding another metric (or removing `pc_loss`) can be achieved by directly accessing
     the `metrics` dictionary of the `Trainer` object. See `Trainer` doc.
 
@@ -559,7 +562,10 @@ class Trainer:
         self.tracker = Tracker(index_name=("batch", "sample", "epoch"))
         self.history = self.tracker.history
         self.invalid_action = invalid_action
-        self.metrics = {"pc_loss": lambda ns, net: net.pc_loss(ns.fast.z).item()}
+        self.metrics = {
+            "pc_loss": lambda ns, net: net.pc_loss(ns.fast.z).item(),
+            "prediction_error": _prediction_error,
+        }
 
     def __call__(self, n_batches: int) -> TrainingIterable:
         return TrainingIterable(self, n_batches)
@@ -618,3 +624,7 @@ def multi_lr(optim: Callable, parameter_groups: list, lr_factors: dict, **kwargs
                     param["lr"] *= factor
 
     return optim_instance
+
+
+def _prediction_error(ns: SimpleNamespace, _) -> float:
+    return ((ns.fast.y_pred - ns.y) ** 2).mean().item()
