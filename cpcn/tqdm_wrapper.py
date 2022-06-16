@@ -1,10 +1,13 @@
 """Define a wrapper for tqdm that outputs useful training progress info."""
 
+import torch
 import numpy as np
 
 from typing import Iterable
 
 from tqdm.autonotebook import tqdm
+
+from cpcn.util import pretty_size
 
 
 def tqdmw(train_it: Iterable, tqdm=tqdm) -> Iterable:
@@ -43,6 +46,10 @@ def tqdmw(train_it: Iterable, tqdm=tqdm) -> Iterable:
                     progress_str = "???"
 
                 progress_info["val " + metric] = progress_str
+
+        if torch.cuda.is_available():
+            memory = torch.cuda.memory_allocated()
+            progress_info["cuda_mem"] = pretty_size(memory)
 
         pbar.set_postfix(progress_info, refresh=False)
         pbar.update()
