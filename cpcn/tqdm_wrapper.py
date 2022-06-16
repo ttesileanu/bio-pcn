@@ -20,6 +20,10 @@ def tqdmw(train_it: Iterable, tqdm=tqdm) -> Iterable:
         yield batch
 
         progress_info = {}
+
+        if hasattr(train_it, "_epoch"):
+            progress_info["epoch"] = str(train_it._epoch)
+
         if (
             hasattr(train_it, "trainer")
             and hasattr(train_it.trainer, "metrics")

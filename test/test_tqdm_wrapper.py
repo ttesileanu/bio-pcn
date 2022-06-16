@@ -24,6 +24,7 @@ class MockTrainerIterable(list):
         ),
         metrics={"pc_loss": None},
     )
+    _epoch = 0
 
 
 @pytest.fixture()
@@ -104,3 +105,16 @@ def test_does_not_fail_with_valid_data(mock_train_it):
     list(tqdmw(mock_train_it, tqdm=mock))
     value = pbar.set_postfix.call_args[0][0]["val pc_loss"]
     assert "???" not in value
+
+
+def test_progress_info_contains_epoch(mock_train_it):
+    epoch = 123
+    mock_train_it._epoch = epoch
+
+    pbar = Mock()
+    mock = Mock(return_value=pbar)
+    list(tqdmw(mock_train_it, tqdm=mock))
+
+    assert "epoch" in pbar.set_postfix.call_args[0][0]
+    value = pbar.set_postfix.call_args[0][0]["epoch"]
+    assert int(value) == epoch
