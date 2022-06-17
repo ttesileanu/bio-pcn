@@ -65,7 +65,7 @@ class PCWrapper:
         """
         ns = self.pc_net.relax(x, y, **kwargs)
 
-        pred_input = ns.z[self.dim].detach()
+        pred_input = ns.z_fwd[self.dim].detach()
         pred_output = self.predictor(pred_input)
 
         ns.y_pred = pred_output

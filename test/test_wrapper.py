@@ -18,7 +18,8 @@ def data() -> tuple:
 def get_mock_net():
     net = Mock()
     net.relax.side_effect = lambda x, y, **kwargs: SimpleNamespace(
-        z=[torch.ones(len(x), 1), x, torch.linalg.norm(y)]
+        z=[torch.ones(len(x), 1), x, torch.linalg.norm(y)],
+        z_fwd=[torch.zeros(len(x), 1), 2 * x, torch.linalg.norm(y) - 1],
     )
     net.pc_loss.return_value = torch.tensor(0.0)
     net.parameters.return_value = [torch.FloatTensor([2.3])]
@@ -300,3 +301,12 @@ def test_str():
     s = str(wrapper)
     assert s.startswith("PCWrapper(")
     assert s.endswith(")")
+
+
+def test_predictor_uses_z_fwd_instead_of_z_from_pc_net(data):
+    wrapper = get_wrapped()
+    ns_pc = wrapper.pc_net.relax(data.x, data.y)
+    ns = wrapper.relax(data.x, data.y)
+
+    expected = wrapper.predictor(ns_pc.z_fwd[-2])
+    assert torch.allclose(ns.y_pred, expected)
