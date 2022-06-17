@@ -3,6 +3,7 @@
 import torch
 import torchvision
 
+import numpy as np
 import pandas as pd
 
 from typing import Optional, Union, Sequence
@@ -290,10 +291,10 @@ def get_constraint_diagnostics(
         each layer); `"evals:?"` (eigenvalues of the covariance matrix, as obtained by
         `eigh`, for each layer); `"max_eval:?"` (maximum eigenvalue for each layer)
     """
-    n_batch = torch.max(latent["batch"]).item()
+    n_batch = np.max(latent["batch"]) + 1
     n_cov = n_batch // every
 
-    res = {"batch": torch.arange(n_cov) * every}
+    res = {"batch": np.arange(n_cov) * every}
     for key, value in latent.items():
         parts = key.split(":")
         if len(parts) < 1 or parts[0] != var:
@@ -302,7 +303,7 @@ def get_constraint_diagnostics(
         layer = parts[1]
 
         size = value.shape[-1]
-        crt_cov = torch.zeros((n_cov, size, size))
+        crt_cov = np.zeros((n_cov, size, size))
         for i in range(n_cov):
             crt_start = i * every
             crt_end = (i + 1) * every
@@ -315,19 +316,15 @@ def get_constraint_diagnostics(
         res[cov_name] = crt_cov
 
         if hasattr(rho, "__getitem__"):
-            i = int(layer) - 1
-            if i >= 0 and i < len(rho):
-                crt_rho = rho[i]
-            else:
-                crt_rho = 1.0
+            crt_rho = rho[int(layer)]
         else:
             crt_rho = rho
-        res["trace:" + layer] = torch.FloatTensor(
-            [torch.trace(crt_cov[i] - crt_rho * torch.eye(size)) for i in range(n_cov)]
+        res["trace:" + layer] = np.array(
+            [np.trace(crt_cov[i] - crt_rho * np.eye(size)) for i in range(n_cov)]
         )
 
-        crt_all_evals = torch.stack([torch.linalg.eigh(_)[0] for _ in crt_cov])
-        crt_max_eval = crt_all_evals.max(dim=-1)[0]
+        crt_all_evals = np.stack([np.linalg.eigh(_)[0] for _ in crt_cov])
+        crt_max_eval = crt_all_evals.max(axis=-1)
 
         res["evals:" + layer] = crt_all_evals
         res["max_eval:" + layer] = crt_max_eval
