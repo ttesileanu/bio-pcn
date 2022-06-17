@@ -9,11 +9,8 @@ import pydove as dv
 import numpy as np
 import torch
 
-from tqdm.notebook import tqdm
-from functools import partial
-
-from cpcn import LinearBioPCN, PCNetwork, load_mnist, Trainer
-from cpcn.graph import show_learning_curves
+from cpcn import *
+from cpcn.graph import *
 
 # %% [markdown]
 # ## Setup
@@ -41,7 +38,7 @@ rho = 1.0
 
 torch.manual_seed(123)
 
-net = PCNetwork(
+net0 = PCNetwork(
     dims,
     activation=lambda _: _,
     z_lr=z_lr,
@@ -52,17 +49,19 @@ net = PCNetwork(
     rho=rho,
     bias=False,
 )
-net = net.to(device)
 
-trainer = Trainer(net, dataset["train"], dataset["validation"])
-trainer.peek_validation(every=10)
-trainer.set_classifier("linear")
+net = PCWrapper(net0, "linear").to(device)
+optimizer = torch.optim.Adam(net.parameters(), lr=0.002)
+trainer = Trainer(dataset["train"])
+trainer.metrics["accuracy"] = one_hot_accuracy
+for batch in tqdmw(trainer(n_batches)):
+    if batch.every(10):
+        batch.evaluate(dataset["validation"]).run(net)
 
-# trainer.set_optimizer(torch.optim.SGD, lr=0.008)
-trainer.set_optimizer(torch.optim.Adam, lr=0.002)
-# trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.99))
+    ns = batch.feed(net)
+    optimizer.step()
 
-results = trainer.run(n_batches=n_batches, progress=tqdm)
+results = trainer.history
 
 # %% [markdown]
 # ### Show PCN learning curves
@@ -88,7 +87,7 @@ g_a[-1] *= 2
 g_b = 0.5 * np.ones(len(dims) - 2)
 g_b[0] *= 2
 
-biopcn_net = LinearBioPCN(
+biopcn_net0 = LinearBioPCN(
     dims,
     z_lr=z_lr,
     z_it=z_it,
@@ -101,18 +100,21 @@ biopcn_net = LinearBioPCN(
     bias_b=False,
     q0_scale=np.sqrt(1 + dims[2] / dims[1]),
 )
-biopcn_net = biopcn_net.to(device)
 
-biopcn_trainer = Trainer(biopcn_net, dataset["train"], dataset["validation"])
-biopcn_trainer.peek_validation(every=10)
-biopcn_trainer.set_classifier("linear")
+biopcn_net = PCWrapper(biopcn_net0, "linear").to(device)
+biopcn_optimizer = multi_lr(
+    torch.optim.SGD, biopcn_net.parameter_groups(), lr_factors={"Q": Q_lr_factor}, lr=0.003
+)
+biopcn_trainer = Trainer(dataset["train"])
+biopcn_trainer.metrics = trainer.metrics
+for batch in tqdmw(biopcn_trainer(n_batches)):
+    if batch.every(10):
+        batch.evaluate(dataset["validation"]).run(biopcn_net)
 
-# biopcn_trainer.set_optimizer(torch.optim.Adam, lr=0.001)
-biopcn_trainer.set_optimizer(torch.optim.SGD, lr=0.003)
-biopcn_trainer.set_lr_factor("Q", Q_lr_factor)
-# biopcn_trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.997))
+    ns = batch.feed(biopcn_net)
+    biopcn_optimizer.step()
 
-biopcn_results = biopcn_trainer.run(n_batches=n_batches, progress=tqdm)
+biopcn_results = biopcn_trainer.history
 
 # %% [markdown]
 # ### Show BioPCN learning curves

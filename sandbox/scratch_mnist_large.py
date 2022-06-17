@@ -9,28 +9,15 @@ import pydove as dv
 import numpy as np
 import torch
 
-from tqdm.notebook import tqdm
-from functools import partial
-
-from cpcn import (
-    LinearBioPCN,
-    PCNetwork,
-    load_mnist,
-    Trainer,
-    get_constraint_diagnostics,
-)
-from cpcn.graph import (
-    show_learning_curves,
-    show_constraint_diagnostics,
-    show_latent_convergence,
-)
+from cpcn import *
+from cpcn.graph import *
 
 # %% [markdown]
 # ## Setup
 
 # %%
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = torch.device("cpu")
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # for reproducibility
 torch.manual_seed(123)
@@ -61,19 +48,22 @@ net = PCNetwork(
 )
 net = net.to(device)
 
-trainer = Trainer(net, dataset["train"], dataset["validation"])
-trainer.peek_validation(every=10)
-# trainer.set_classifier("linear")
+optimizer = torch.optim.SGD(net.parameters(), lr=0.008)
+trainer = Trainer(dataset["train"])
+trainer.metrics["accuracy"] = one_hot_accuracy
+for batch in tqdmw(trainer(n_batches)):
+    if batch.every(10):
+        batch.evaluate(dataset["validation"]).run(net)
+        batch.weight.report("W", net.W)
 
-trainer.set_optimizer(torch.optim.SGD, lr=0.008)
-# trainer.set_optimizer(torch.optim.Adam, lr=0.002)
-# trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.99))
+    ns = batch.feed(net, latent_profile=True)
+    batch.latent.report_batch("z", ns.fast.z)
+    if batch.count(4):
+        batch.fast.report_batch("z", [_.transpose(0, 1) for _ in ns.fast.profile.z])
 
-trainer.peek_sample("latent", ["z"])
-trainer.peek_fast_dynamics("fast", ["z"], count=4)
-trainer.peek("weight", ["W"], every=10)
+    optimizer.step()
 
-results = trainer.run(n_batches=n_batches, progress=tqdm)
+results = trainer.history
 
 # %% [markdown]
 # ### Show PCN learning curves
@@ -83,10 +73,16 @@ results = trainer.run(n_batches=n_batches, progress=tqdm)
 _ = show_learning_curves(results)
 _ = show_learning_curves(results, var_names=("pc_loss", "prediction_error"))
 
+# %%
+
+with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
+    show_latent_convergence(results.fast, layer=1, ax=ax1)
+    show_latent_convergence(results.fast, layer=2, ax=ax2)
+
 # %% [markdown]
 # ### Show covariance diagnostics
 
-cons_diag = get_constraint_diagnostics(results.latent, rho=[0.2, 0.02])
+cons_diag = get_constraint_diagnostics(results.latent, rho=[1.0, 0.2, 0.02, 1.0])
 _ = show_constraint_diagnostics(cons_diag, layer=1, rho=0.2)
 _ = show_constraint_diagnostics(cons_diag, layer=2, rho=0.02)
 
@@ -130,34 +126,29 @@ biopcn_net = LinearBioPCN(
 )
 biopcn_net = biopcn_net.to(device)
 
-biopcn_trainer = Trainer(biopcn_net, dataset["train"], dataset["validation"])
-biopcn_trainer.peek_validation(every=10).add_nan_guard(every=10)
-# biopcn_trainer.set_classifier("linear")
-
-# biopcn_trainer.set_optimizer(torch.optim.Adam, lr=0.001)
-biopcn_trainer.set_optimizer(torch.optim.SGD, lr=0.012)
-# biopcn_trainer.set_optimizer(torch.optim.SGD, lr=0.001)
-biopcn_trainer.set_lr_factor("Q", Q_lr_factor)
-biopcn_trainer.set_lr_factor("W_a:0", 2)
-biopcn_trainer.set_lr_factor("W_a:1", 2)
-# biopcn_trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.997))
-
-lr_power = 1.0
-# lr_rate = -0.4e-3
-lr_rate = 0
-biopcn_trainer.add_scheduler(
-    partial(
-        torch.optim.lr_scheduler.LambdaLR,
-        lr_lambda=lambda batch: 1 / (1 + lr_rate * batch ** lr_power),
-    ),
-    every=1,
+biopcn_optimizer = multi_lr(
+    torch.optim.SGD,
+    biopcn_net.parameter_groups(),
+    lr_factors={"Q": Q_lr_factor, "W_a": 2},
+    lr=0.012,
 )
+biopcn_trainer = Trainer(dataset["train"], invalid_action="warn+stop")
+biopcn_trainer.metrics = trainer.metrics
+for batch in tqdmw(biopcn_trainer(n_batches)):
+    if batch.every(10):
+        batch.evaluate(dataset["validation"]).run(biopcn_net)
+        batch.weight.report(
+            {"W_a": biopcn_net.W_a, "W_b": biopcn_net.W_b, "Q": biopcn_net.Q}
+        )
 
-biopcn_trainer.peek_sample("latent", ["z"])
-biopcn_trainer.peek_fast_dynamics("fast", ["z"], count=4)
-biopcn_trainer.peek("weight", ["W_a", "W_b", "Q"], every=10)
+    ns = batch.feed(biopcn_net, latent_profile=True)
+    batch.latent.report_batch("z", ns.fast.z)
+    if batch.count(4):
+        batch.fast.report_batch("z", [_.transpose(0, 1) for _ in ns.fast.profile.z])
 
-biopcn_results = biopcn_trainer.run(n_batches=n_batches, progress=tqdm)
+    biopcn_optimizer.step()
+
+biopcn_results = biopcn_trainer.history
 
 # %% [markdown]
 # ### Show BioPCN learning curves
@@ -207,7 +198,9 @@ with dv.FigureManager(1, 2) as (_, (ax1, ax2)):
 # %% [markdown]
 # ### Show covariance diagnostics
 
-biopcn_cons_diag = get_constraint_diagnostics(biopcn_results.latent, rho=biopcn_net.rho)
+biopcn_cons_diag = get_constraint_diagnostics(
+    biopcn_results.latent, rho=[1] + list(biopcn_net.rho) + [1]
+)
 _ = show_constraint_diagnostics(biopcn_cons_diag, layer=1, rho=biopcn_net.rho[0])
 _ = show_constraint_diagnostics(biopcn_cons_diag, layer=2, rho=biopcn_net.rho[1])
 

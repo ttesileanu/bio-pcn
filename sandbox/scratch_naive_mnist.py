@@ -9,11 +9,8 @@ import pydove as dv
 import numpy as np
 import torch
 
-from tqdm.notebook import tqdm
-from functools import partial
-
-from cpcn import LinearBioPCN, PCNetwork, load_mnist, Trainer
-from cpcn.graph import show_learning_curves
+from cpcn import *
+from cpcn.graph import *
 
 # %% [markdown]
 # ## Setup
@@ -52,25 +49,24 @@ net = PCNetwork(
 )
 net = net.to(device)
 
-trainer = Trainer(net, dataset["train"], dataset["validation"])
-trainer.peek_validation(every=10).add_nan_guard()
-# trainer.set_classifier("linear")
-
-trainer.set_optimizer(torch.optim.SGD, lr=0.01)
-trainer.set_lr_factor("Q", 0.11)
+optimizer = multi_lr(
+    torch.optim.SGD, net.parameter_groups(), lr_factors={"Q": 0.11}, lr=0.01
+)
 lr_power = 1.0
 lr_rate = 4e-4
-trainer.add_scheduler(
-    partial(
-        torch.optim.lr_scheduler.LambdaLR,
-        lr_lambda=lambda batch: 1 / (1 + lr_rate * batch ** lr_power),
-    ),
-    every=1,
+scheduler = torch.optim.lr_scheduler.LambdaLR(
+    optimizer, lr_lambda=lambda batch: 1 / (1 + lr_rate * batch ** lr_power)
 )
+trainer = Trainer(dataset["train"])
+trainer.metrics["accuracy"] = one_hot_accuracy
+for batch in tqdmw(trainer(n_batches)):
+    if batch.every(10):
+        batch.evaluate(dataset["validation"]).run(net)
+    ns = batch.feed(net)
+    optimizer.step()
+    scheduler.step()
 
-trainer.peek_model(count=4)
-
-results = trainer.run(n_batches=n_batches, progress=tqdm)
+results = trainer.history
 
 # %% [markdown]
 # ### Show PCN learning curves
@@ -111,23 +107,24 @@ biopcn_net = LinearBioPCN(
 )
 biopcn_net = biopcn_net.to(device)
 
-biopcn_trainer = Trainer(biopcn_net, dataset["train"], dataset["validation"])
-biopcn_trainer.peek_validation(every=10)
-biopcn_trainer.set_classifier("linear")
-
-biopcn_trainer.set_optimizer(torch.optim.SGD, lr=0.003)
-biopcn_trainer.set_lr_factor("Q", 3.5)
+biopcn_optimizer = multi_lr(
+    torch.optim.SGD, biopcn_net.parameter_groups(), lr_factors={"Q": 3.5}, lr=0.003
+)
 lr_power = 1.0
 lr_rate = 2e-4
-biopcn_trainer.add_scheduler(
-    partial(
-        torch.optim.lr_scheduler.LambdaLR,
-        lr_lambda=lambda batch: 1 / (1 + lr_rate * batch ** lr_power),
-    ),
-    every=1,
+biopcn_scheduler = torch.optim.lr_scheduler.LambdaLR(
+    biopcn_optimizer, lr_lambda=lambda batch: 1 / (1 + lr_rate * batch ** lr_power)
 )
+biopcn_trainer = Trainer(dataset["train"])
+biopcn_trainer.metrics = trainer.metrics
+for batch in tqdmw(biopcn_trainer(n_batches)):
+    if batch.every(10):
+        batch.evaluate(dataset["validation"]).run(biopcn_net)
+    ns = batch.feed(biopcn_net)
+    biopcn_optimizer.step()
+    biopcn_scheduler.step()
 
-biopcn_results = biopcn_trainer.run(n_batches=n_batches, progress=tqdm)
+biopcn_results = biopcn_trainer.history
 
 # %% [markdown]
 # ### Show BioPCN learning curves
