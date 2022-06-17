@@ -8,6 +8,7 @@ import pydove as dv
 
 import numpy as np
 import torch
+import time
 
 from cpcn import *
 from cpcn.graph import *
@@ -34,6 +35,7 @@ dims = [784, 50, 5, 10]
 z_it = 50
 z_lr = 0.07
 
+t0 = time.time()
 torch.manual_seed(123)
 
 net = PCNetwork(
@@ -64,6 +66,7 @@ for batch in tqdmw(trainer(n_batches)):
     optimizer.step()
 
 results = trainer.history
+print(f"Training PCN took {time.time() - t0:.1f} seconds.")
 
 # %% [markdown]
 # ### Show PCN learning curves
@@ -101,6 +104,7 @@ rho = [0.2, 0.02]
 # rho = 0.1
 # rho = 0.0012
 
+t0 = time.time()
 torch.manual_seed(123)
 
 # match the PCN network
@@ -149,6 +153,7 @@ for batch in tqdmw(biopcn_trainer(n_batches)):
     biopcn_optimizer.step()
 
 biopcn_results = biopcn_trainer.history
+print(f"Training BioPCN took {time.time() - t0:.1f} seconds.")
 
 # %% [markdown]
 # ### Show BioPCN learning curves

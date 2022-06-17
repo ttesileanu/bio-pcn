@@ -8,6 +8,7 @@ import pydove as dv
 
 import numpy as np
 import torch
+import time
 
 from cpcn import *
 from cpcn.graph import *
@@ -36,6 +37,7 @@ z_lr = 0.07
 rho = 1.0
 # rho = 0.0012
 
+t0 = time.time()
 torch.manual_seed(123)
 
 net0 = PCNetwork(
@@ -62,6 +64,7 @@ for batch in tqdmw(trainer(n_batches)):
     optimizer.step()
 
 results = trainer.history
+print(f"Training PCN took {time.time() - t0:.1f} seconds.")
 
 # %% [markdown]
 # ### Show PCN learning curves
@@ -78,6 +81,7 @@ z_it = 50
 z_lr = 0.02
 Q_lr_factor = 5
 
+t0 = time.time()
 torch.manual_seed(123)
 
 # match the PCN network
@@ -103,8 +107,12 @@ biopcn_net0 = LinearBioPCN(
 
 biopcn_net = PCWrapper(biopcn_net0, "linear").to(device)
 biopcn_optimizer = multi_lr(
-    torch.optim.SGD, biopcn_net.parameter_groups(), lr_factors={"Q": Q_lr_factor}, lr=0.003
+    torch.optim.SGD,
+    biopcn_net.pc_net.parameter_groups(),
+    lr_factors={"Q": Q_lr_factor},
+    lr=0.003,
 )
+biopcn_predictor_optimizer = torch.optim.Adam(biopcn_net.predictor.parameters())
 biopcn_trainer = Trainer(dataset["train"])
 biopcn_trainer.metrics = trainer.metrics
 for batch in tqdmw(biopcn_trainer(n_batches)):
@@ -113,8 +121,10 @@ for batch in tqdmw(biopcn_trainer(n_batches)):
 
     ns = batch.feed(biopcn_net)
     biopcn_optimizer.step()
+    biopcn_predictor_optimizer.step()
 
 biopcn_results = biopcn_trainer.history
+print(f"Training BioPCN took {time.time() - t0:.1f} seconds.")
 
 # %% [markdown]
 # ### Show BioPCN learning curves
