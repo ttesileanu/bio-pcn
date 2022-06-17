@@ -184,7 +184,8 @@ class LinearBioPCN:
         with torch.no_grad():
             # start with a simple forward pass to initialize the layer values
             z = self.forward(x)
-            y_pred = z[-1].clone()
+            z_fwd = [_.clone() for _ in z]
+            y_pred = z_fwd[-1]
 
             # fix the output layer values
             z[-1] = y.detach()
@@ -230,7 +231,7 @@ class LinearBioPCN:
                         latent.b[k][i, :, :] = b[k]
                         latent.n[k][i, :, :] = n[k]
 
-        ns = SimpleNamespace(z=z, a=a, b=b, n=n, y_pred=y_pred)
+        ns = SimpleNamespace(z=z, a=a, b=b, n=n, y_pred=y_pred, z_fwd=z_fwd)
         if latent_profile:
             ns.profile = latent
         else:

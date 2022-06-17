@@ -159,7 +159,8 @@ class PCNetwork(object):
 
         # start with a simple forward pass to initialize the layer values
         z = self.forward(x)
-        y_pred = z[-1].clone()
+        z_fwd = [_.clone() for _ in z]
+        y_pred = z_fwd[-1]
 
         # fix the output layer values
         z[-1] = y.detach()
@@ -188,7 +189,7 @@ class PCNetwork(object):
                 for k, crt_z in enumerate(z):
                     latent[k][i, :, :] = crt_z
 
-        ns = SimpleNamespace(z=z, y_pred=y_pred, profile=SimpleNamespace())
+        ns = SimpleNamespace(z=z, z_fwd=z_fwd, y_pred=y_pred, profile=SimpleNamespace())
         if pc_loss_profile:
             ns.profile.pc_loss = losses
         if latent_profile:

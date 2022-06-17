@@ -1468,3 +1468,11 @@ def test_relax_y_pred_equal_to_last_layer_from_forward(net, data):
     ns = net.relax(data.x, data.y)
 
     assert torch.allclose(ns.y_pred, fwd_z[-1])
+
+
+def test_relax_outputs_z_fwd(net, data):
+    fwd_z = net.forward(data.x)
+    ns = net.relax(data.x, data.y)
+
+    for z1, z2 in zip(ns.z_fwd, fwd_z):
+        assert torch.allclose(z1, z2)
