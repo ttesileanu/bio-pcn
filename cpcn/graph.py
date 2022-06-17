@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import seaborn as sns
 
-import torch
 import numpy as np
 
 from types import SimpleNamespace
@@ -37,11 +36,11 @@ def show_constraint_diagnostics(
 
     # draw the matrices
     n_cov = len(diagnostics["batch"])
-    sel_cov = torch.linspace(0, n_cov - 1, 5).int()
+    sel_cov = np.linspace(0, n_cov - 1, 5, dtype=int)
 
     for ax, i in zip(mat_axs, sel_cov):
         crt_cov = diagnostics[f"cov:{layer}"][i]
-        crt_scale = torch.max(torch.abs(crt_cov))
+        crt_scale = np.max(np.abs(crt_cov))
         ax.imshow(crt_cov, vmin=-crt_scale, vmax=crt_scale, cmap="RdBu_r")
         ax.set_title(f"batch {diagnostics['batch'][i]}")
 
@@ -214,12 +213,12 @@ def show_learning_curves(
 
 
 def show_weight_evolution(
-    x: torch.Tensor, weights: torch.Tensor, ax: plt.Axes, max_lines: int = 10000
+    x: np.ndarray, weights: np.ndarray, ax: plt.Axes, max_lines: int = 10000
 ):
     weights = weights.reshape(len(weights), -1)
     n_lines = weights.shape[1]
     if n_lines > max_lines:
-        idxs = torch.linspace(0, n_lines - 1, max_lines).long()
+        idxs = np.linspace(0, n_lines - 1, max_lines, dtype=int)
         weights = weights[:, idxs]
         n_lines = max_lines
     alpha = max(min(50 / n_lines, 0.5), 0.01)
@@ -248,8 +247,7 @@ def show_latent_convergence(
     cmap = mpl.cm.winter
 
     # focus on the last sample of each batch
-    max_sample = torch.max(fast_results["sample"]).item()
-    crt_sel = fast_results["sample"] == max_sample
+    crt_sel = np.hstack((np.diff(fast_results["batch"]) > 0, True))
 
     batch = fast_results["batch"][crt_sel]
     z = fast_results[f"z:{layer}"][crt_sel]
@@ -258,11 +256,11 @@ def show_latent_convergence(
     for i in range(n):
         color = cmap(int(cmap.N * (0.2 + 0.8 * i / n)))
         diff = z[i, :, :] - z[i, 0, :]
-        diff = diff / torch.max(torch.abs(diff))
+        diff = diff / np.max(np.abs(diff))
         ax.plot(diff, c=color, lw=0.5)
 
     sm = mpl.cm.ScalarMappable(
-        cmap=cmap, norm=mpl.pyplot.Normalize(vmin=0, vmax=torch.max(batch))
+        cmap=cmap, norm=mpl.pyplot.Normalize(vmin=0, vmax=np.max(batch))
     )
     sm.ax = ax
     cbar = dv.colorbar(sm)
