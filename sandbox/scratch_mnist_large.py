@@ -59,9 +59,9 @@ for batch in tqdmw(trainer(n_batches)):
         batch.weight.report("W", net.W)
 
     ns = batch.feed(net, latent_profile=True)
-    batch.latent.report_batch("z", ns.fast.z)
+    batch.latent.report_batch("z", ns.z)
     if batch.count(4):
-        batch.fast.report_batch("z", [_.transpose(0, 1) for _ in ns.fast.profile.z])
+        batch.fast.report_batch("z", [_.transpose(0, 1) for _ in ns.profile.z])
 
     optimizer.step()
 
@@ -146,9 +146,9 @@ for batch in tqdmw(biopcn_trainer(n_batches)):
         )
 
     ns = batch.feed(biopcn_net, latent_profile=True)
-    batch.latent.report_batch("z", ns.fast.z)
+    batch.latent.report_batch("z", ns.z)
     if batch.count(4):
-        batch.fast.report_batch("z", [_.transpose(0, 1) for _ in ns.fast.profile.z])
+        batch.fast.report_batch("z", [_.transpose(0, 1) for _ in ns.profile.z])
 
     biopcn_optimizer.step()
 

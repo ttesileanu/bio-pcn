@@ -42,14 +42,15 @@ class Batch:
 
         :param net: network to feed the batch to
         :param **kwargs: additional arguments to pass to `net.relax()`
-        :return: namespace containing the batch's `x` and `y`, as well as the output
-        from `net.relax()`, in `fast`.
+        :return: namespace returned by `net.relax()`, augmented to also contain the
+            batch's `x` and `y`
         """
         # run fast dynamics
         res = net.relax(self.x, self.y, **kwargs)
-        ns = SimpleNamespace(x=self.x, y=self.y, fast=res)
+        res.x = self.x
+        res.y = self.y
 
-        return ns
+        return res
 
     def __len__(self) -> int:
         """Number of samples in batch."""
@@ -231,8 +232,8 @@ class TrainingBatch(Batch):
 
         :param net: network to feed the batch to
         :param **kwargs: additional arguments to pass to `net.relax()`
-        :return: namespace containing the batch's `x` and `y`, as well as the output
-        from `net.relax()`, in `fast`.
+        :return: namespace returned by `net.relax()`, augmented to also contain the
+            batch's `x` and `y`
         """
         ns = super().feed(net, **kwargs)
 
@@ -244,7 +245,7 @@ class TrainingBatch(Batch):
             self.train.accumulate(metric_name, metric)
 
         # calculate gradients
-        net.calculate_weight_grad(ns.fast)
+        net.calculate_weight_grad(ns)
 
         return ns
 
@@ -414,8 +415,8 @@ class EvaluationBatch(Batch):
 
         :param net: network to feed the batch to
         :param **kwargs: additional arguments to pass to `net.relax()`
-        :return: namespace containing the batch's `x` and `y`, as well as the output
-        from `net.relax()`, in `fast`.
+        :return: namespace returned by `net.relax()`, augmented to also contain the
+            batch's `x` and `y`
         """
         ns = super().feed(net, **kwargs)
 
@@ -596,7 +597,7 @@ class Trainer:
         self.history = self.tracker.history
         self.invalid_action = invalid_action
         self.metrics = {
-            "pc_loss": lambda ns, net: net.pc_loss(ns.fast.z).item(),
+            "pc_loss": lambda ns, net: net.pc_loss(ns.z).item(),
             "prediction_error": _prediction_error,
         }
         self.check_invalid = check_invalid
@@ -661,4 +662,4 @@ def multi_lr(optim: Callable, parameter_groups: list, lr_factors: dict, **kwargs
 
 
 def _prediction_error(ns: SimpleNamespace, _) -> float:
-    return ((ns.fast.y_pred - ns.y) ** 2).mean().item()
+    return ((ns.y_pred - ns.y) ** 2).mean().item()

@@ -21,12 +21,12 @@ def one_hot_accuracy(ns, net) -> float:
     """Calculate accuracy of a batch of predictions, assuming one-hot true labels.
     
     :param ns: namespace with output from `TrainingBatch.feed()`; should have fields
-        `ns.y` (the ground truth) and `ns.fast.y_pred` (the prediction)
+        `ns.y` (the ground truth) and `ns.y_pred` (the prediction)
     :param net: network making the prediction; this is unused here
     :return: fraction of correctly identified samples in the batch
     """
     y = ns.y
-    y_pred = ns.fast.y_pred
+    y_pred = ns.y_pred
 
     n = len(y)
     idx_pred = y_pred.argmax(dim=1)
@@ -43,13 +43,13 @@ def dot_accuracy(ns, net) -> float:
         0.5 * (1 + dot(x, y) / (norm(x) * norm(y))) .
 
     :param ns: namespace with output from `TrainingBatch.feed()`; should have fields
-        `ns.y` (the ground truth) and `ns.fast.y_pred` (the prediction)
+        `ns.y` (the ground truth) and `ns.y_pred` (the prediction)
     :param net: network making the prediction; this is unused here
     :return: an indication of the normalized dot product (uncentered correlation)
         averaged over samples; this will range from 0 to 1
     """
     y = ns.y
-    y_pred = ns.fast.y_pred
+    y_pred = ns.y_pred
 
     norm_pred = torch.linalg.norm(y_pred, dim=1)
     norm = torch.linalg.norm(y, dim=1)

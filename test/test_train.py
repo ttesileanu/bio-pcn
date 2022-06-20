@@ -117,20 +117,22 @@ def test_batch_feed_sends_other_kwargs_to_net_relax(trainer, mock_net):
     mock_net.relax.assert_called_once_with(batch.x, batch.y, foo=foo)
 
 
-def test_batch_feed_return_contains_results_from_relax_in_fast(trainer, mock_net):
+def test_batch_feed_return_contains_results_from_relax(trainer, mock_net):
     ret_val = SimpleNamespace(z=[], foo="test", y_pred=torch.FloatTensor([0.0]))
     mock_net.relax.return_value = ret_val
     for batch in trainer(1):
         ns = batch.feed(mock_net)
 
-    assert ns.fast == ret_val
+    for key, value in ret_val.__dict__.items():
+        assert hasattr(ns, key)
+        assert getattr(ns, key) is value
 
 
-def test_batch_feed_calls_calculate_weight_grad_with_fast(trainer, mock_net):
+def test_batch_feed_calls_calculate_weight_grad_with_feed_results(trainer, mock_net):
     for batch in trainer(1):
         ns = batch.feed(mock_net)
 
-    mock_net.calculate_weight_grad.assert_called_once_with(ns.fast)
+    mock_net.calculate_weight_grad.assert_called_once_with(ns)
 
 
 def test_batch_contains_batch_index(trainer):
@@ -192,7 +194,7 @@ def test_evaluate_batch_feed_sends_other_kwargs_to_net_relax(
     mock_net.relax.assert_called_once_with(batch.x, batch.y, foo=foo)
 
 
-def test_evaluate_batch_feed_return_contains_results_from_relax_in_fast(
+def test_evaluate_batch_feed_return_contains_results_from_relax(
     trainer, val_loader_one, mock_net
 ):
     ret_val = SimpleNamespace(z=[], foo="test", y_pred=torch.FloatTensor([0.0]))
@@ -201,7 +203,9 @@ def test_evaluate_batch_feed_return_contains_results_from_relax_in_fast(
     for batch in train_batch.evaluate(val_loader_one):
         ns = batch.feed(mock_net)
 
-    assert ns.fast == ret_val
+    for key, value in ret_val.__dict__.items():
+        assert hasattr(ns, key)
+        assert getattr(ns, key) is value
 
 
 def test_evaluate_batch_feed_calls_does_not_call_calculate_weight_grad(
@@ -511,7 +515,7 @@ def test_removing_pc_loss_from_metrics_but_having_different_one_removes_it_from_
 @pytest.mark.parametrize("field", ["all_train", "train", "validation"])
 def test_custom_metric_stores_values(trainer, field, val_loader):
     def custom_metric(ns, net) -> float:
-        norm_z = sum(np.linalg.norm(_) for _ in ns.fast.z)
+        norm_z = sum(np.linalg.norm(_) for _ in ns.z)
         norm_w = np.trace(net.W)
         return norm_z + norm_w
 
@@ -551,7 +555,7 @@ def trainer_with_meld() -> SimpleNamespace:
     n = 3
     for batch in trainer(n):
         ns = batch.feed(net)
-        batch.latent.report_batch("z", ns.fast.z)
+        batch.latent.report_batch("z", ns.z)
 
     return SimpleNamespace(trainer=trainer, a=a, b=b, n=n)
 
@@ -722,7 +726,7 @@ def test_trainer_report_batch_reports_correct_epochs(trainer):
     k = 3
     for batch in trainer(k * n):
         ns = batch.feed(net)
-        batch.latent.report_batch("z", ns.fast.z)
+        batch.latent.report_batch("z", ns.z)
 
     m = len(a)
     expected_epoch = np.repeat(np.arange(k), n * m)
@@ -737,7 +741,7 @@ def test_prediction_error_defined_correctly(trainer):
     y = torch.FloatTensor([[-0.5, 0.3], [0.7, 0.8]])
     y_pred = torch.FloatTensor([[0.2, 0.1], [-0.4, 0.5]])
 
-    ns = SimpleNamespace(y=y, fast=SimpleNamespace(y_pred=y_pred))
+    ns = SimpleNamespace(y=y, y_pred=y_pred)
     pred_err = trainer.metrics["prediction_error"](ns, None)
 
     expected = torch.mean((y - y_pred) ** 2).item()

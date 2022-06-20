@@ -29,7 +29,7 @@ def test_one_hot_accuracy():
 
     expected_accuracy = (y[0, 2] + y[1, 0] + y[2, 2]) / 3
 
-    ns = SimpleNamespace(y=y, fast=SimpleNamespace(y_pred=y_pred))
+    ns = SimpleNamespace(y=y, y_pred=y_pred)
     accuracy = one_hot_accuracy(ns, None)
 
     assert pytest.approx(accuracy) == expected_accuracy
@@ -46,7 +46,7 @@ def test_dot_accuracy():
         expected_accuracy += 0.5 * (1 + torch.dot(crt_y, crt_y_pred))
 
     expected_accuracy /= len(y)
-    ns = SimpleNamespace(y=y, fast=SimpleNamespace(y_pred=y_pred))
+    ns = SimpleNamespace(y=y, y_pred=y_pred)
     accuracy = dot_accuracy(ns, None)
 
     assert pytest.approx(accuracy) == expected_accuracy
