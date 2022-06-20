@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pydove as dv
 
+import time
 import numpy as np
 import torch
 
@@ -39,27 +40,33 @@ z_lr = 0.1
 
 # %%
 
+t0 = time.time()
 torch.manual_seed(seed)
 
-net = PCNetwork(
-    dims, activation=lambda _: _, z_lr=z_lr, z_it=z_it, variances=1.0, bias=False,
+net0 = PCNetwork(
+    dims, activation=lambda _: _, z_lr=z_lr, z_it=z_it, variances=1.0, bias=False
 )
-net = net.to(device)
 
-trainer = Trainer(net, dataset["train"], dataset["validation"])
-trainer.peek_validation(every=10)
-trainer.set_classifier("linear")
+net = PCWrapper(net0, "linear").to(device)
+optimizer = torch.optim.SGD(net.pc_net.parameters(), lr=0.008)
+predictor_optimizer = torch.optim.Adam(net.predictor.parameters())
+trainer = Trainer(dataset["train"], invalid_action="warn+stop")
+trainer.metrics["accuracy"] = one_hot_accuracy
+for batch in tqdmw(trainer(n_batches)):
+    if batch.every(10):
+        batch.evaluate(dataset["validation"]).run(net)
+        batch.weight.report({"W": net.pc_net.W})
 
-trainer.set_optimizer(torch.optim.SGD, lr=0.008)
-# trainer.set_optimizer(torch.optim.Adam, lr=0.003)
-# trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.99))]
+    ns = batch.feed(net, latent_profile=True)
+    batch.latent.report_batch("z", ns.z)
+    if batch.count(4):
+        batch.fast.report_batch("z", [_.transpose(0, 1) for _ in ns.profile.z])
 
-trainer.peek("weight", ["W"], every=10)
-trainer.peek_sample("latent", ["z"])
+    optimizer.step()
+    predictor_optimizer.step()
 
-trainer.peek_fast_dynamics("fast", ["z"], count=4)
-
-results = trainer.run(n_batches=n_batches, progress=tqdm)
+results = trainer.history
+print(f"Training PCN took {time.time() - t0:.1f} seconds.")
 
 # %% [markdown]
 # ## Check convergence of PCN without constraint
@@ -82,7 +89,7 @@ cons_diag = get_constraint_diagnostics(results.latent, rho=1.0)
 fig = show_constraint_diagnostics(cons_diag, rho=1.0)
 fig.suptitle("PCN no constraint")
 
-crt_log_evals = np.mean(np.log10(cons_diag["evals:1"][-50:].numpy()), 0)
+crt_log_evals = np.mean(np.log10(cons_diag["evals:1"][-50:]), 0)
 crt_log_dist = np.diff(crt_log_evals)
 crt_idx = crt_log_dist.argmax()
 crt_log_thresh = 0.5 * (crt_log_evals[crt_idx] + crt_log_evals[crt_idx + 1])
@@ -95,16 +102,17 @@ with dv.FigureManager() as (fig, ax):
     ax.set_ylabel("evals of $z z^\\top$")
     fig.suptitle("PCN no constraint")
 
-print(f"approximate rank: {torch.sum(cons_diag['evals:1'][-1] > crt_thresh)}")
+print(f"approximate rank: {np.sum(cons_diag['evals:1'][-1] > crt_thresh)}")
 
 # %% [markdown]
 # ## What happens when we add a constraint?
 
 # %%
 
+t0 = time.time()
 torch.manual_seed(seed)
 rho = 0.1
-net_cons = PCNetwork(
+net_cons0 = PCNetwork(
     dims,
     activation=lambda _: _,
     z_lr=z_lr,
@@ -113,20 +121,30 @@ net_cons = PCNetwork(
     constrained=True,
     rho=rho,
     bias=False,
-).to(device)
+)
 
-trainer_cons = Trainer(net_cons, dataset["train"], dataset["validation"])
-trainer_cons.set_lr_factor("Q", 2)
-trainer_cons.peek_validation(every=10)
-trainer_cons.set_classifier("linear")
+net_cons = PCWrapper(net_cons0, "linear").to(device)
+optimizer_cons = multi_lr(
+    torch.optim.SGD, net_cons.pc_net.parameter_groups(), lr_factors={"Q": 2}, lr=0.008,
+)
+predictor_optimizer_cons = torch.optim.Adam(net_cons.predictor.parameters())
+trainer_cons = Trainer(dataset["train"], invalid_action="warn+stop")
+trainer_cons.metrics = trainer.metrics
+for batch in tqdmw(trainer_cons(n_batches)):
+    if batch.every(10):
+        batch.evaluate(dataset["validation"]).run(net_cons)
+        batch.weight.report({"W": net_cons.pc_net.W, "Q": net_cons.pc_net.Q})
 
-trainer_cons.set_optimizer(torch.optim.SGD, lr=0.008)
-# trainer_cons.set_optimizer(torch.optim.Adam, lr=0.003)
+    ns = batch.feed(net_cons, latent_profile=True)
+    batch.latent.report_batch("z", ns.z)
+    if batch.count(4):
+        batch.fast.report_batch("z", [_.transpose(0, 1) for _ in ns.profile.z])
 
-trainer_cons.peek("weight", ["W", "Q"], every=10).peek_sample("latent", ["z"])
-trainer_cons.peek_fast_dynamics("fast", ["z"], count=4)
+    optimizer_cons.step()
+    predictor_optimizer_cons.step()
 
-results_cons = trainer_cons.run(n_batches=n_batches, progress=tqdm)
+results_cons = trainer_cons.history
+print(f"Training PCN with constraint took {time.time() - t0:.1f} seconds.")
 
 # %% [markdown]
 # ## Check convergence of PCN with constraint
@@ -160,23 +178,33 @@ with dv.FigureManager() as (fig, ax):
 
 # %%
 
+t0 = time.time()
 torch.manual_seed(seed)
 
-cpcn = LinearBioPCN.from_pcn(net_cons).to(device)
+cpcn0 = LinearBioPCN.from_pcn(net_cons0).to(device)
 
-trainer_cpcn = Trainer(cpcn, dataset["train"], dataset["validation"])
-trainer_cpcn.set_lr_factor("Q", 0.5)
-trainer_cpcn.peek_validation(every=10)
-trainer_cpcn.set_classifier("linear")
+cpcn = PCWrapper(cpcn0, "linear").to(device)
+optimizer_cpcn = multi_lr(
+    torch.optim.SGD, cpcn0.parameter_groups(), lr_factors={"Q": 0.5}, lr=0.008,
+)
+predictor_optimizer_cpcn = torch.optim.Adam(cpcn.predictor.parameters())
+trainer_cpcn = Trainer(dataset["train"], invalid_action="warn+stop")
+trainer_cpcn.metrics = trainer.metrics
+for batch in tqdmw(trainer_cpcn(n_batches)):
+    if batch.every(10):
+        batch.evaluate(dataset["validation"]).run(cpcn)
+        batch.weight.report({"W_a": cpcn0.W_a, "W_b": cpcn0.W_b, "Q": cpcn0.Q})
 
-trainer_cpcn.set_optimizer(torch.optim.SGD, lr=0.008)
-# trainer_cpcn.set_optimizer(torch.optim.Adam, lr=0.003)
-# trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.99))]
+    ns = batch.feed(cpcn, latent_profile=True)
+    batch.latent.report_batch("z", ns.z)
+    if batch.count(4):
+        batch.fast.report_batch("z", [_.transpose(0, 1) for _ in ns.profile.z])
 
-trainer_cpcn.peek("weight", ["W_a", "W_b", "Q"], every=10).peek_sample("latent", ["z"])
-trainer_cpcn.peek_fast_dynamics("fast", ["z"], count=4)
+    optimizer_cpcn.step()
+    predictor_optimizer_cpcn.step()
 
-results_cpcn = trainer_cpcn.run(n_batches=n_batches, progress=tqdm)
+results_cpcn = trainer_cpcn.history
+print(f"Training BioPCN took {time.time() - t0:.1f} seconds.")
 
 # %% [markdown]
 # ## Check convergence of BioPCN
@@ -199,7 +227,7 @@ cons_diag_cpcn = get_constraint_diagnostics(results_cpcn.latent, rho=1.0)
 fig = show_constraint_diagnostics(cons_diag_cpcn, rho=1.0)
 fig.suptitle("BioPCN")
 
-crt_log_evals = np.mean(np.log10(cons_diag_cpcn["evals:1"][-50:].numpy()), 0)
+crt_log_evals = np.mean(np.log10(cons_diag_cpcn["evals:1"][-50:]), 0)
 crt_log_dist = np.diff(crt_log_evals)
 crt_idx = crt_log_dist.argmax()
 crt_log_thresh = 0.5 * (crt_log_evals[crt_idx] + crt_log_evals[crt_idx + 1])
@@ -212,14 +240,14 @@ with dv.FigureManager() as (fig, ax):
     ax.set_ylabel("evals of $z z^\\top$")
     fig.suptitle("BioPCN")
 
-print(f"approximate rank: {torch.sum(cons_diag_cpcn['evals:1'][-1] > crt_thresh)}")
+print(f"approximate rank: {np.sum(cons_diag_cpcn['evals:1'][-1] > crt_thresh)}")
 
 # %%
 
 fig = show_constraint_diagnostics(cons_diag_cpcn, rho=1.0, layer=2)
 fig.suptitle("BioPCN")
 
-crt_log_evals = np.mean(np.log10(cons_diag_cpcn["evals:2"][-50:].numpy()), 0)
+crt_log_evals = np.mean(np.log10(cons_diag_cpcn["evals:2"][-50:]), 0)
 crt_log_dist = np.diff(crt_log_evals)
 crt_idx = crt_log_dist.argmax()
 crt_log_thresh = 0.5 * (crt_log_evals[crt_idx] + crt_log_evals[crt_idx + 1])
@@ -232,6 +260,6 @@ with dv.FigureManager() as (fig, ax):
     ax.set_ylabel("evals of $z z^\\top$")
     fig.suptitle("BioPCN")
 
-print(f"approximate rank: {torch.sum(cons_diag_cpcn['evals:2'][-1] > crt_thresh)}")
+print(f"approximate rank: {np.sum(cons_diag_cpcn['evals:2'][-1] > crt_thresh)}")
 
 # %%

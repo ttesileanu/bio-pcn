@@ -7,6 +7,7 @@ import pydove as dv
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
+import time
 import torch
 
 from tqdm.notebook import tqdm
@@ -42,9 +43,10 @@ z_lr = 0.07
 # rho = 0.001875
 rho = 0.0012
 
+t0 = time.time()
 torch.manual_seed(123)
 
-net = PCNetwork(
+net0 = PCNetwork(
     dims,
     z_lr=z_lr,
     z_it=z_it,
@@ -53,26 +55,31 @@ net = PCNetwork(
     fast_optimizer=torch.optim.Adam,
     bias=False,
 )
-net = net.to(device)
 
-trainer = Trainer(net, dataset["train"], dataset["validation"])
-trainer.peek_validation(every=10)
-trainer.set_classifier("linear")
+net = PCWrapper(net0, "linear").to(device)
+optimizer = multi_lr(
+    torch.optim.SGD, net.pc_net.parameter_groups(), lr_factors={"Q": 10.0}, lr=0.02,
+)
+predictor_optimizer = torch.optim.Adam(net.predictor.parameters())
+trainer = Trainer(dataset["train"], invalid_action="warn+stop")
+trainer.metrics["accuracy"] = one_hot_accuracy
+for batch in tqdmw(trainer(n_batches)):
+    if batch.every(10):
+        batch.evaluate(dataset["validation"]).run(net)
+        batch.weight.report(
+            {"W": net.pc_net.W, "Q": net.pc_net.Q,}
+        )
 
-trainer.set_optimizer(torch.optim.SGD, lr=0.02)
-trainer.set_lr_factor("Q", 10)
-# trainer.set_optimizer(torch.optim.Adam, lr=0.003)
-# trainer.add_scheduler(partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.9))
+    ns = batch.feed(net, latent_profile=True)
+    batch.latent.report_batch("z", ns.z)
+    if batch.count(4):
+        batch.fast.report_batch("z", [_.transpose(0, 1) for _ in ns.profile.z])
 
-if net.constrained:
-    trainer.peek("weight", ["W", "Q"], every=10)
-else:
-    trainer.peek("weight", ["W"], every=10)
-trainer.peek_sample("latent", ["z"])
+    optimizer.step()
+    predictor_optimizer.step()
 
-trainer.peek_fast_dynamics("fast", ["z"], count=4)
-
-results = trainer.run(n_batches=n_batches, progress=tqdm)
+results = trainer.history
+print(f"Training BioPCN took {time.time() - t0:.1f} seconds.")
 
 # %% [markdown]
 # ## Check convergence of latent variables
@@ -102,7 +109,7 @@ _ = show_learning_curves(results)
 
 # %%
 
-D = len(net.dims) - 1
+D = len(net.pc_net.dims) - 1
 with dv.FigureManager(1, D) as (_, axs):
     for k, ax in enumerate(axs):
         show_weight_evolution(results.weight["batch"], results.weight[f"W:{k}"], ax=ax)

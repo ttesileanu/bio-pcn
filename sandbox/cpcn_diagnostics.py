@@ -7,6 +7,7 @@ import pydove as dv
 import matplotlib as mpl
 
 import torch
+import time
 
 from tqdm.notebook import tqdm
 
@@ -40,6 +41,7 @@ z_lr = 0.1
 # rho = 0.015
 rho = 0.0012
 
+t0 = time.time()
 torch.manual_seed(123)
 
 # match the PCN network
@@ -49,7 +51,7 @@ g_a[-1] *= 2
 g_b = 0.5 * torch.ones(len(dims) - 2)
 g_b[0] *= 2
 
-net = LinearBioPCN(
+net0 = LinearBioPCN(
     dims,
     z_lr=z_lr,
     z_it=z_it,
@@ -62,39 +64,31 @@ net = LinearBioPCN(
     bias_a=False,
     bias_b=False,
 )
-net = net.to(device)
 
-trainer = Trainer(net, dataset["train"], dataset["validation"])
-trainer.peek_validation(every=10)
-trainer.set_classifier("linear")
-
-initial_lr = 0.008
-final_lr = initial_lr
-trainer.set_optimizer(torch.optim.Adam, lr=initial_lr)
-trainer.set_optimizer(torch.optim.SGD, lr=initial_lr)
-# power = 0.8
-# rate = (initial_lr / final_lr - 1) / (n_batches ** power)
-# trainer.add_scheduler(
-#     partial(
-#         torch.optim.lr_scheduler.LambdaLR,
-#         lr_lambda=lambda batch: 1 / (1 + rate * epoch ** power),
-#     ),
-#     every=1,
-# )
-
-trainer.set_lr_factor("Q", 20.0)
-
-trainer.peek("weight", ["W_a", "W_b", "Q", "M"], every=10)
-trainer.peek_sample("latent", ["z"], sample_mask=torch.arange(batch_size) % 4 == 0)
-
-trainer.peek_fast_dynamics(
-    "fast",
-    ["a", "b", "z", "n"],
-    count=4,
-    sample_mask=torch.arange(batch_size) % 10 == 0,
+net = PCWrapper(net0, "linear").to(device)
+optimizer = multi_lr(
+    torch.optim.SGD, net.pc_net.parameter_groups(), lr_factors={"Q": 20.0}, lr=0.008,
 )
+predictor_optimizer = torch.optim.Adam(net.predictor.parameters())
+trainer = Trainer(dataset["train"], invalid_action="warn+stop")
+trainer.metrics["accuracy"] = one_hot_accuracy
+for batch in tqdmw(trainer(n_batches)):
+    if batch.every(10):
+        batch.evaluate(dataset["validation"]).run(net)
+        batch.weight.report(
+            {"W_a": net.pc_net.W_a, "W_b": net.pc_net.W_b, "Q": net.pc_net.Q,}
+        )
 
-results = trainer.run(n_batches=n_batches, progress=tqdm)
+    ns = batch.feed(net, latent_profile=True)
+    batch.latent.report_batch("z", ns.z)
+    if batch.count(4):
+        batch.fast.report_batch("z", [_.transpose(0, 1) for _ in ns.profile.z])
+
+    optimizer.step()
+    predictor_optimizer.step()
+
+results = trainer.history
+print(f"Training BioPCN took {time.time() - t0:.1f} seconds.")
 
 # %% [markdown]
 # ## Check convergence of latent variables
@@ -124,7 +118,7 @@ _ = show_learning_curves(results)
 
 # %%
 
-D = len(net.inter_dims)
+D = len(net.pc_net.inter_dims)
 with dv.FigureManager(3, D, squeeze=False) as (_, axs):
     for ax_row, w_choice in zip(axs, ["W_a", "W_b", "Q"]):
         for k, ax in enumerate(ax_row):
