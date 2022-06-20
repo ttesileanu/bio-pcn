@@ -222,7 +222,7 @@ def show_weight_evolution(
         weights = weights[:, idxs]
         n_lines = max_lines
     alpha = max(min(50 / n_lines, 0.5), 0.01)
-    ax.plot(x.numpy(), weights.numpy(), c="k", lw=0.5, alpha=alpha)
+    ax.plot(x, weights, c="k", lw=0.5, alpha=alpha)
 
     ax.set_xlabel("batch")
     ax.set_ylabel("weight")
