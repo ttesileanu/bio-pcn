@@ -4,29 +4,19 @@
 import os
 import time
 from types import SimpleNamespace
-from functools import partial
 
 import pydove as dv
 from tqdm.notebook import tqdm
 
+import numpy as np
 import torch
-from cpcn import LinearBioPCN, load_mnist, Trainer
+from cpcn import LinearBioPCN, load_mnist, Trainer, tqdmw, multi_lr
 
 import optuna
 from optuna.trial import TrialState
 
-import pickle
-
 # %% [markdown]
 # ## Defining the optimization
-
-
-def optuna_reporter(trial: optuna.trial.Trial, ns: SimpleNamespace):
-    trial.report(ns.val_loss, ns.epoch)
-
-    # early pruning
-    if trial.should_prune():
-        raise optuna.exceptions.TrialPruned()
 
 
 def create_biopcn(trial):
@@ -68,37 +58,34 @@ def objective(
     seed: int,
     n_rep: int,
 ) -> float:
-    scores = torch.zeros(n_rep)
+    scores = np.zeros(n_rep)
     for i in tqdm(range(n_rep)):
         torch.manual_seed(seed + i)
         net = create_biopcn(trial).to(device)
 
-        optimizer_class = torch.optim.SGD
         lr = trial.suggest_float("lr", 5e-4, 0.05, log=True)
-
-        trainer = Trainer(net, dataset["train"], dataset["validation"])
-        trainer.set_optimizer(optimizer_class, lr=lr)
-
-        lr_power = 1.0
         lr_rate = trial.suggest_float("lr_rate", 1e-5, 0.2, log=True)
-        trainer.add_scheduler(
-            partial(
-                torch.optim.lr_scheduler.LambdaLR,
-                lr_lambda=lambda batch: 1 / (1 + lr_rate * batch ** lr_power),
-            ),
-            every=1,
+        Q_lrf = trial.suggest_float("Q_lrf", 0.1, 20, log=True)
+
+        optimizer = multi_lr(
+            torch.optim.SGD, net.parameter_groups(), lr_factors={"Q": Q_lrf}, lr=lr
+        )
+        scheduler = torch.optim.lr_scheduler.LambdaLR(
+            optimizer, lr_lambda=lambda batch: 1 / (1 + lr_rate * batch)
         )
 
-        Q_lrf = trial.suggest_float("Q_lrf", 0.1, 20, log=True)
-        trainer.set_lr_factor("Q", Q_lrf)
+        trainer = Trainer(dataset["train"], invalid_action="warn+stop")
+        for batch in trainer(n_batches):
+            if batch.every(10):
+                batch.evaluate(dataset["validation"]).run(net)
 
-        trainer.peek_validation(count=10)
+            batch.feed(net)
+            optimizer.step()
+            scheduler.step()
 
-        # trainer.add_epoch_observer(lambda ns: optuna_reporter(trial, ns))
-        results = trainer.run(n_batches=n_batches)
-        scores[i] = results.validation["pc_loss"][-1]
+        scores[i] = trainer.history.validation["pc_loss"][-1]
 
-    score = torch.quantile(scores, 0.90).item()
+    score = np.quantile(scores, 0.90)
     return score
 
 
@@ -142,10 +129,5 @@ for key, value in trial.params.items():
 # %%
 
 optuna.visualization.matplotlib.plot_param_importances(study)
-
-# %%
-
-with open(os.path.join("save", "hyperopt_biopcn.pkl"), "wb") as f:
-    pickle.dump(study, f)
 
 # %%

@@ -4,18 +4,16 @@
 import os
 import time
 from types import SimpleNamespace
-from functools import partial
 
 import pydove as dv
 from tqdm.notebook import tqdm
 
+import numpy as np
 import torch
-from cpcn import PCNetwork, load_mnist, Trainer
+from cpcn import PCNetwork, load_mnist, Trainer, tqdmw, multi_lr
 
 import optuna
 from optuna.trial import TrialState
-
-import pickle
 
 # %% [markdown]
 # ## Defining the optimization
@@ -26,9 +24,10 @@ def create_pcn(trial):
 
     z_lr = trial.suggest_float("z_lr", 0.01, 0.2, log=True)
     rho = 0.015
+
     net = PCNetwork(
         dims,
-        activation=lambda _: _,
+        activation="none",
         z_lr=z_lr,
         z_it=50,
         variances=1,
@@ -48,36 +47,34 @@ def objective(
     seed: int,
     n_rep: int,
 ) -> float:
-    scores = torch.zeros(n_rep)
+    scores = np.zeros(n_rep)
     for i in tqdm(range(n_rep)):
         torch.manual_seed(seed + i)
         net = create_pcn(trial).to(device)
 
-        optimizer_class = torch.optim.SGD
         lr = trial.suggest_float("lr", 5e-4, 0.05, log=True)
-
-        trainer = Trainer(net, dataset["train"], dataset["validation"])
-        trainer.set_optimizer(optimizer_class, lr=lr).add_nan_guard()
-
-        lr_power = 1.0
         lr_rate = trial.suggest_float("lr_rate", 1e-5, 0.2, log=True)
-        trainer.add_scheduler(
-            partial(
-                torch.optim.lr_scheduler.LambdaLR,
-                lr_lambda=lambda batch: 1 / (1 + lr_rate * batch ** lr_power),
-            ),
-            every=1,
+        Q_lrf = trial.suggest_float("Q_lrf", 0.1, 20, log=True)
+
+        optimizer = multi_lr(
+            torch.optim.SGD, net.parameter_groups(), lr_factors={"Q": Q_lrf}, lr=lr
+        )
+        scheduler = torch.optim.lr_scheduler.LambdaLR(
+            optimizer, lr_lambda=lambda batch: 1 / (1 + lr_rate * batch)
         )
 
-        Q_lrf = trial.suggest_float("Q_lrf", 0.1, 20, log=True)
-        trainer.set_lr_factor("Q", Q_lrf)
+        trainer = Trainer(dataset["train"], invalid_action="warn+stop")
+        for batch in trainer(n_batches):
+            if batch.every(10):
+                batch.evaluate(dataset["validation"]).run(net)
 
-        trainer.peek_validation(count=10)
+            batch.feed(net)
+            optimizer.step()
+            scheduler.step()
 
-        results = trainer.run(n_batches=n_batches)
-        scores[i] = results.validation["pc_loss"][-1]
+        scores[i] = trainer.history.validation["pc_loss"][-1]
 
-    score = torch.quantile(scores, 0.90).item()
+    score = np.quantile(scores, 0.90)
     return score
 
 
@@ -87,7 +84,7 @@ t0 = time.time()
 
 device = torch.device("cpu")
 
-n_batches = 400
+n_batches = 500
 seed = 1927
 n_rep = 5
 
@@ -97,7 +94,7 @@ sampler = optuna.samplers.TPESampler(seed=seed)
 study = optuna.create_study(direction="minimize", sampler=sampler)
 study.optimize(
     lambda trial: objective(trial, n_batches, dataset, device, seed, n_rep),
-    n_trials=15,
+    n_trials=25,
     timeout=15000,
     show_progress_bar=True,
 )
@@ -121,8 +118,3 @@ for key, value in trial.params.items():
 # %%
 
 optuna.visualization.matplotlib.plot_param_importances(study)
-
-# %%
-
-with open(os.path.join("save", "hyperopt_pcn.pkl"), "wb") as f:
-    pickle.dump(study, f)
