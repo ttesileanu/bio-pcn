@@ -3,6 +3,7 @@ import pytest
 
 import torch
 import numpy as np
+import warnings
 
 from cpcn.train import Trainer, DivergenceError, DivergenceWarning, multi_lr
 from cpcn.track import Tracker
@@ -393,9 +394,11 @@ def test_report_check_invalid_stops_if_invalid_action_is_stop_or_warn_stop(
 ):
     count = 0
     trainer.invalid_action = warn_type
-    for batch in trainer(3):
-        count += 1
-        batch.test.report("foo", np.nan, check_invalid=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore" if warn_type.startswith("warn") else "error")
+        for batch in trainer(3):
+            count += 1
+            batch.test.report("foo", np.nan, check_invalid=True)
 
     assert count == 1
 
