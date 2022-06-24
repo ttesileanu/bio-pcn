@@ -1,6 +1,7 @@
 import pytest
 
 import torch
+import warnings
 
 from unittest.mock import Mock
 from types import SimpleNamespace
@@ -16,9 +17,15 @@ def data() -> tuple:
 
 
 def get_mock_net():
+    dims = [3, 3, 2]
+
     net = Mock()
     net.relax.side_effect = lambda x, y, **kwargs: SimpleNamespace(
-        z=[torch.ones(len(x), 1), x, torch.linalg.norm(y)],
+        z=[
+            torch.ones(len(x), 1),
+            x,
+            torch.linalg.norm(y) * torch.ones(len(x), dims[-1]),
+        ],
         z_fwd=[torch.zeros(len(x), 1), 2 * x, torch.linalg.norm(y) - 1],
     )
     net.pc_loss.return_value = torch.tensor(0.0)
@@ -26,7 +33,7 @@ def get_mock_net():
     net.parameter_groups.return_value = [
         {"name": "a", "params": torch.FloatTensor([2.3])}
     ]
-    net.dims = [3, 3, 2]
+    net.dims = dims
 
     return net
 
@@ -178,7 +185,7 @@ def test_wrapper_str_predictor(kind, data):
     if kind == "linear-relu":
         predictor = torch.nn.Sequential(predictor, torch.nn.ReLU())
     elif kind == "linear-softmax":
-        predictor = torch.nn.Sequential(predictor, torch.nn.Softmax())
+        predictor = torch.nn.Sequential(predictor, torch.nn.Softmax(1))
     else:
         assert kind == "linear"
     wrapper2 = PCWrapper(net2, predictor)
@@ -310,3 +317,11 @@ def test_predictor_uses_z_fwd_instead_of_z_from_pc_net(data):
 
     expected = wrapper.predictor(ns_pc.z_fwd[-2])
     assert torch.allclose(ns.y_pred, expected)
+
+
+def test_linear_softmax_does_not_warn(data):
+    net = get_mock_net()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        wrapper = PCWrapper(net, "linear-softmax")
+        wrapper.relax(data.x, data.y)

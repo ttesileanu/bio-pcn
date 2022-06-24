@@ -49,7 +49,7 @@ class PCWrapper:
             if predictor == "linear-relu":
                 predictor = torch.nn.Sequential(linear_predictor, torch.nn.ReLU())
             elif predictor == "linear-softmax":
-                predictor = torch.nn.Sequential(linear_predictor, torch.nn.Softmax())
+                predictor = torch.nn.Sequential(linear_predictor, torch.nn.Softmax(1))
             elif predictor == "linear":
                 predictor = linear_predictor
             else:
