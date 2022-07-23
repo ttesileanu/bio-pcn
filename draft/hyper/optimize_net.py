@@ -1,27 +1,25 @@
 #! /usr/bin/env python
-"""Optimize hyperparameters for a PCN or BioPCN with a single hidden layer."""
+"""Optimize hyperparameters for a PCN or BioPCN."""
 
 import os
 import argparse
 import time
 from functools import partial
 
-from tqdm import tqdm
-
 import torch
 from cpcn import PCNetwork, LinearBioPCN, BioPCN, load_mnist, load_csv, Trainer
-from cpcn import dot_accuracy, one_hot_accuracy
+from cpcn import dot_accuracy, one_hot_accuracy, multi_lr
 
 import optuna
 from optuna.trial import TrialState
 
 import pickle
 
-from typing import Callable
+from typing import Callable, Optional
 
 
-def create_net(algo: str, dims: list, rho: float, trial):
-    z_lr = trial.suggest_float("z_lr", 0.01, 0.2, log=True)
+def create_net(algo: str, dims: list, rho: list, trial, z_lr_range: tuple):
+    z_lr = trial.suggest_float("z_lr", z_lr_range[0], z_lr_range[1], log=True)
 
     kwargs = {"z_lr": z_lr, "z_it": 50, "rho": rho}
     if algo == "pcn":
@@ -87,9 +85,14 @@ def objective(
     n_rep: int,
     algo: str,
     dims: list,
-    rho: float,
+    rho: list,
     accuracy_fct: Callable,
     constraint: bool,
+    z_lr_range: tuple,
+    lr_range: tuple,
+    lr_decay_range: tuple,
+    Q_lrf_range: tuple,
+    Wa_lrf_range: Optional[tuple],
 ) -> float:
     torch.manual_seed(seed)
     seed0 = torch.randint(0, 2_000_000_000, (1,)).item()
@@ -97,33 +100,35 @@ def objective(
     scores = torch.zeros(n_rep)
     for i in range(n_rep):
         torch.manual_seed(seed0 + i)
-        net = create_net(algo, dims, rho, trial).to(device)
+        net = create_net(algo, dims, rho, trial, z_lr_range).to(device)
 
-        optimizer_class = torch.optim.SGD
-        lr = trial.suggest_float("lr", 5e-4, 0.05, log=True)
+        lr = trial.suggest_float("lr", *lr_range, log=True)
+        lr_decay = trial.suggest_float("lr_decay", *lr_decay_range, log=True)
 
-        trainer = Trainer(net, dataset["train"], dataset["validation"])
-        trainer.set_accuracy_fct(accuracy_fct)
-        trainer.set_optimizer(optimizer_class, lr=lr).add_nan_guard(count=10)
+        lr_factors = {}
+        if constraint:
+            lr_factors["Q"] = trial.suggest_float("Q_lrf", *Q_lrf_range, log=True)
+        if Wa_lrf_range is not None and hasattr(net, "W_a") and hasattr(net, "W_b"):
+            lr_factors["W_a"] = trial.suggest_float("Wa_lrf", *Wa_lrf_range, log=True)
 
-        lr_power = 1.0
-        lr_rate = trial.suggest_float("lr_rate", 1e-5, 0.2, log=True)
-        trainer.add_scheduler(
-            partial(
-                torch.optim.lr_scheduler.LambdaLR,
-                lr_lambda=lambda batch: 1 / (1 + lr_rate * batch ** lr_power),
-            ),
-            every=1,
+        optimizer = multi_lr(
+            torch.optim.SGD, net.parameter_groups(), lr_factors=lr_factors, lr=lr
+        )
+        scheduler = torch.optim.lr_scheduler.LambdaLR(
+            optimizer, lr_lambda=lambda batch: 1 / (1 + lr_decay * batch)
         )
 
-        if constraint:
-            Q_lrf = trial.suggest_float("Q_lrf", 0.1, 20, log=True)
-            trainer.set_lr_factor("Q", Q_lrf)
+        trainer = Trainer(dataset["train"], invalid_action="warn+stop")
+        trainer.metrics["accuracy"] = accuracy_fct
+        for batch in trainer(n_batches):
+            if batch.every(10):
+                batch.evaluate(dataset["validation"]).run(net)
 
-        trainer.peek_validation(count=10)
+            batch.feed(net)
+            optimizer.step()
+            scheduler.step()
 
-        results = trainer.run(n_batches=n_batches)
-        scores[i] = results.validation["pc_loss"][-1]
+        scores[i] = trainer.history.validation["pc_loss"][-1]
 
     score = torch.quantile(scores, 0.90).item()
     return score
@@ -136,27 +141,46 @@ if __name__ == "__main__":
     parser.add_argument("out", help="output file")
     parser.add_argument("dataset", help="dataset: mnist or mmill")
     parser.add_argument("algo", help="algorithm: pcn, biopcn, biopcn-nl, wb")
-    parser.add_argument("arch", help="architecture: one, two, or large-two")
-    parser.add_argument("rho", type=float, help="constraint magnitude")
+    parser.add_argument("arch", help="architecture: small or many_n1[_n2[...]]")
     parser.add_argument("trials", type=int, help="number of trials")
     parser.add_argument("seed", type=int, help="starting random number seed")
 
+    parser.add_argument(
+        "--rho", type=float, nargs="+", default=1.0, help="constraint magnitudes"
+    )
     parser.add_argument("--n-batches", type=int, default=500, help="number of batches")
     parser.add_argument("--n-rep", type=int, default=10, help="number of repetitions")
 
+    parser.add_argument(
+        "--z-lr", type=float, nargs=2, default=[0.01, 0.2], help="range for z_lr"
+    )
+    parser.add_argument(
+        "--lr", type=float, nargs=2, default=[5e-4, 0.05], help="range for lr"
+    )
+    parser.add_argument(
+        "--lr-decay",
+        type=float,
+        nargs=2,
+        default=[1e-5, 0.2],
+        help="range for lr_decay",
+    )
+    parser.add_argument(
+        "--Q-lrf", type=float, nargs=2, default=[0.1, 20.0], help="range for Q_lrf"
+    )
+    parser.add_argument(
+        "--Wa-lrf", type=float, nargs=2, default=None, help="range for Wa_lrf"
+    )
+
     args = parser.parse_args()
+
+    print(f"{args.algo} on {args.dataset} for {args.trials} trials; seed {args.seed}")
+    print(f"n_batches: {args.n_batches}, n_rep: {args.n_rep}")
 
     torch.set_num_threads(1)
 
-    if args.arch == "small":
-        args.arch = "one"
-
-    # using the GPU hinders more than helps for the smaller models
-    if args.arch in ["one", "two"] or not torch.cuda.is_available():
-        device = torch.device("cpu")
-    else:
-        device = torch.device("cuda")
-    print(device)
+    # harder to find cluster nodes for GPU, so using CPU for all models
+    device = torch.device("cpu")
+    print(f"device: {device}")
 
     t0 = time.time()
     if args.dataset == "mnist":
@@ -175,16 +199,20 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"unknown dataset, {args.dataset}")
 
-    if args.arch == "one":
+    if args.arch == "small":
         hidden_dims = [5]
-    elif args.arch == "two":
-        hidden_dims = [10, 5]
-    elif args.arch == "large-two":
-        hidden_dims = [600, 600]
+    elif args.arch.startswith("many_"):
+        hidden_dims_list = args.arch.split("_")[1:]
+        hidden_dims = [int(_) for _ in hidden_dims_list]
     else:
-        raise ValueError("unknown architecture, {args.arch}")
+        raise ValueError(f"unknown architecture, {args.arch}")
     one_sample = next(iter(dataset["train"]))
     dims = [one_sample[0].shape[-1]] + hidden_dims + [one_sample[1].shape[-1]]
+    print(f"network dims: {dims}")
+    print(f"rho: {args.rho}")
+
+    if hasattr(args.rho, "__len__"):
+        assert len(args.rho) == len(hidden_dims)
 
     sampler = optuna.samplers.TPESampler(seed=args.seed)
     study = optuna.create_study(direction="minimize", sampler=sampler)
@@ -200,6 +228,11 @@ if __name__ == "__main__":
             n_rep=args.n_rep,
             accuracy_fct=accuracy_fct,
             constraint=args.algo != "wb",
+            z_lr_range=args.z_lr,
+            lr_range=args.lr,
+            lr_decay_range=args.lr_decay,
+            Q_lrf_range=args.Q_lrf,
+            Wa_lrf_range=args.Wa_lrf,
             device=device,
         ),
         n_trials=args.trials,

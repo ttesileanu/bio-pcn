@@ -1,9 +1,7 @@
 *.pkl
 err_*.txt
 out_*.txt
-task_file.db_disBatch_*
-task_file_wb.db_disBatch_*
-task_file_wb_gpu.db_disBatch_*
+task_file*.db_disBatch_*
 slurm-*.out
 slurm_job_*.*sh
 mnist_pcn_*

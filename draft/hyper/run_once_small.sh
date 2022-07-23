@@ -2,26 +2,21 @@
 
 source ~/.bashrc
 
-# run_once_two <seed> <dataset> <algo> <rho1> <rho2>
+# run_once <seed> <dataset> <algo> <rho>
 
 seed=$1
 dataset=$2
 algo=$3
-rho1=$4
-rho2=$5
-
-hidden1=50
-hidden2=5
-arch="many_${hidden1}_${hidden2}"
+rho=$4
+arch="small"
 
 trials=100
 if [ "${algo}" = "wb" ]; then
-    folder="${dataset}_${algo}_large"
+    folder="${dataset}_${algo}_small"
     rho_args=""
 else
-    all_rho="${rho1}_${rho2}"
-    folder="${dataset}_${algo}_large_rho${all_rho}"
-    rho_args="--rho ${rho1} ${rho2}"
+    folder="${dataset}_${algo}_small_rho${rho}"
+    rho_args="--rho ${rho}"
 fi
 
 mkdir -p ${folder}/log
@@ -42,9 +37,5 @@ conda activate cpcn
     $trials \
     $seed \
     $rho_args \
-    --lr 1e-3 0.05 \
-    --lr-decay 1e-5 0.01 \
-    --Q-lrf 0.1 10.0 \
-    --Wa-lrf 0.3 4.0 \
     > "${folder}/log/out_${seed}.txt" \
     2> "${folder}/log/err_${seed}.txt"
