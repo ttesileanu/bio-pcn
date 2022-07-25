@@ -16,6 +16,7 @@ dependencies:
  - scikit-learn
  - optuna
  - tqdm
- - ipykernel
+ - jupyter
+ - ipywidgets
  - pip:
    - pydove
