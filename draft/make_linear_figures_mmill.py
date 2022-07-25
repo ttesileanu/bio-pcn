@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pydove as dv
 
-import torch
 import numpy as np
 
 from tqdm.notebook import tqdm
@@ -81,7 +80,6 @@ fig_path = "figs"
 def make_plot(
     histories: dict,
     max_batch: int,
-    batch_size: int,
     min_batch: int = 1,
     figsize: tuple = (1.75, 1.25),
     y_var: str = "pc_loss",
@@ -92,9 +90,6 @@ def make_plot(
         ) as (fig, ax):
             for net_type in histories:
                 crt_data = [_.validation for _ in histories[net_type]]
-                # XXX this changes it in place!
-                for _ in crt_data:
-                    _["sample"] = batch_size * _["batch"]
                 crt_min_mask = crt_data[0]["batch"] >= min_batch
                 crt_max_mask = crt_data[0]["batch"] < max_batch
                 crt_mask = crt_min_mask & crt_max_mask
@@ -159,9 +154,19 @@ all_histories = {}
 # rho = 1.0
 rho_mapping = {"small": 0.2, "large": 1.0}
 
+# unfortunately the naming convention for the hyperparam optimization wasn't
+# very well chosen...
+convert = lambda x: f"{x:.1f}" if np.abs(x - np.round(x)) < 1e-8 else f"{x:g}"
 for arch in tqdm(all_arch, desc="arch"):
     rho = rho_mapping[arch]
-    contexts = {_: f"mmill_{_}_{arch}_rho{rho if _ != 'wb' else 1.0}" for _ in all_algo}
+    contexts = {}
+    for algo in all_algo:
+        value = f"mmill_{algo}_{arch}"
+        if algo != "wb":
+            value += f"_rho{convert(rho)}"
+            if arch == "large":
+                value += f"_{convert(rho / 10)}"
+        contexts[algo] = value
     histories = {_: [] for _ in contexts}
     for net_type, context in contexts.items():
         path = osp.join("simulations", context)
@@ -186,25 +191,19 @@ for arch in tqdm(all_arch, desc="arch"):
 
 # %%
 
-batch_size = 100
 max_batches = {"small": 3000, "large": 3000}
 for arch, histories in all_histories.items():
-    fig, ax = make_plot(histories, batch_size=batch_size, max_batch=max_batches[arch])
+    fig, ax = make_plot(histories, max_batch=max_batches[arch])
     ax.yaxis.set_minor_formatter(mpl.ticker.FuncFormatter(lambda y, _: f"{y:.0f}"))
     fig.savefig(osp.join(fig_path, f"mmill_linear_{arch}_pc_loss.pdf"))
 
 # %%
 
-batch_size = 100
-max_batches = {"small": 3000, "large": 3000}
 for arch, histories in all_histories.items():
     if "prediction_error" not in histories["wb"][0].validation:
         continue
     fig, ax = make_plot(
-        histories,
-        batch_size=batch_size,
-        max_batch=max_batches[arch],
-        y_var="prediction_error",
+        histories, max_batch=max_batches[arch], y_var="prediction_error"
     )
     ax.yaxis.set_minor_formatter(mpl.ticker.FuncFormatter(lambda y, _: f"{y:.1f}"))
     ax.set_ylabel("MSE")
@@ -213,8 +212,11 @@ for arch, histories in all_histories.items():
 # %%
 
 rho = rho_mapping["large"]
-name = osp.join("simulations", f"mmill_biopcn_large_rho{rho}", "history_700.pkl")
-# name = osp.join("simulations", f"mmill_biopcn_large_rho{rho}_long", "history_700.pkl")
+name = osp.join(
+    "simulations",
+    f"mmill_biopcn_large_rho{convert(rho)}_{convert(rho / 10)}",
+    "history_700.pkl",
+)
 with open(name, "rb") as f:
     crt_history = pickle.load(f)
     crt_cons_diag = crt_history.constraint
@@ -226,28 +228,29 @@ _ = show_constraint_diagnostics(crt_cons_diag, layer=2, rho=crt_rho[1])
 # %%
 
 
-def rolling_average(y: torch.Tensor, n: int) -> torch.Tensor:
+def rolling_average(y: np.ndarray, n: int) -> np.ndarray:
     if y.ndim < 2:
-        y = y.unsqueeze(1)
+        y = y[:, None]
         was_unsqueezed = True
     else:
         was_unsqueezed = False
 
-    pad_front = torch.zeros_like(y[0])
-    pad_back = y[-1].expand(n - 1, -1)
-    y_padded = torch.vstack((pad_front, y, pad_back))
+    pad_front = np.zeros_like(y[0])
+    pad_back = np.tile(y[-1], (n - 1, 1))
+    y_padded = np.vstack((pad_front, y, pad_back))
 
-    y_cumul = torch.cumsum(y_padded, dim=0)
+    y_cumul = np.cumsum(y_padded, axis=0)
     y_roll = (y_cumul[n:] - y_cumul[:-n]) / n
 
     if was_unsqueezed:
-        y_roll.squeeze_(1)
+        y_roll = y_roll[:, 0]
 
     return y_roll
 
 
 # %%
 
+batch_size = 100
 roll_n = 5
 for layer in range(len(crt_rho)):
     with plt.style.context(paper_style):
@@ -257,10 +260,10 @@ for layer in range(len(crt_rho)):
             fig,
             ax,
         ):
-            crt_x = (crt_cons_diag["batch"] * batch_size).numpy()
+            crt_x = crt_cons_diag["batch"] * batch_size
 
             l = layer + 1
-            crt_y = rolling_average(crt_cons_diag[f"evals:{l}"], roll_n).numpy()
+            crt_y = rolling_average(crt_cons_diag[f"evals:{l}"], roll_n)
             ax.axhline(crt_rho[layer], c="k", ls="--", lw=1.0, zorder=-1)
             ax.plot(crt_x, crt_y, c=color_map["biopcn"], lw=0.5, alpha=0.7, zorder=1)
             ax.set_xlabel("iteration")
@@ -275,7 +278,7 @@ for layer in range(len(crt_rho)):
             ax.set_ylim(0, 3 * crt_rho[layer])
 
             iax = fig.add_axes([0.65, 0.60, 0.25, 0.30])
-            crt_cov = crt_cons_diag[f"cov:{l}"][-1].numpy()
+            crt_cov = crt_cons_diag[f"cov:{l}"][-1]
             crt_lim = np.max(np.abs(crt_cov))
             h = iax.imshow(crt_cov, vmin=-crt_lim, vmax=crt_lim, cmap="RdBu_r")
             iax.set_xticks([])

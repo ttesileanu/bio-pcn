@@ -94,12 +94,24 @@ all_rho_large = {
 }
 all_histories = {}
 
-batch_size = 100
 arch = "large"
 # arch = "small"
-all_rho = all_rho_small if arch == "small" else all_rho_large
+# unfortunately the naming convention for the hyperparam optimization wasn't
+# very well chosen...
+convert = lambda x: f"{x:.1f}" if np.abs(x - np.round(x)) < 1e-8 else f"{x:g}"
+
+# all_rho = all_rho_small if arch == "small" else all_rho_large
+all_rho = all_rho_small
 for algo in tqdm(all_algo, desc="algo"):
-    contexts = {_: f"mmill_{algo}_{arch}_rho{_}" for _ in all_rho[algo]}
+    contexts = {}
+    base = f"mmill_{algo}_{arch}"
+    for crt_rho in all_rho[algo]:
+        value = base
+        if algo != "wb":
+            value += f"_rho{convert(crt_rho)}"
+            if arch == "large":
+                value += f"_{convert(crt_rho / 10)}"
+        contexts[crt_rho] = value
     histories = {_: [] for _ in contexts}
     for crt_rho, context in contexts.items():
         path = osp.join("simulations", context)
@@ -116,28 +128,9 @@ for algo in tqdm(all_algo, desc="algo"):
                 del crt_history.weight
                 del crt_history.constraint
 
-                # add sample info
-                for key, crt_dict in crt_history.__dict__.items():
-                    if "batch" in crt_dict and "sample" not in crt_dict:
-                        crt_dict["sample"] = batch_size * crt_dict["batch"]
-
                 histories[crt_rho].append(crt_history)
 
     all_histories[algo] = histories
-
-# %%
-
-# context = "mmill_wb_large_rho1.0"
-# name = osp.join("simulations", context, "history_100.pkl")
-# with open(name, "rb") as f:
-#     long_wb_run = pickle.load(f)
-#     del long_wb_run.weight
-#     del long_wb_run.constraint
-
-#     # add sample info
-#     for key, crt_dict in long_wb_run.__dict__.items():
-#         if "batch" in crt_dict and "sample" not in crt_dict:
-#             crt_dict["sample"] = batch_size * crt_dict["batch"]
 
 # %% [markdown]
 # ## Make the plot
@@ -185,10 +178,7 @@ with plt.style.context(paper_style):
             # )
             try:
                 crt_median = np.median(
-                    np.asarray(
-                        [_["pc_loss"][crt_mask].detach().numpy() for _ in crt_data]
-                    ),
-                    axis=0,
+                    np.asarray([_["pc_loss"][crt_mask] for _ in crt_data]), axis=0
                 )
                 ax.plot(
                     crt_data[0]["sample"][crt_mask],
@@ -283,8 +273,8 @@ with plt.style.context(paper_style):
 
         ax.legend(handles=legend_elements, frameon=False, loc="upper center")
 
-        ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda y, _: f"{y}"))
-        ax.yaxis.set_minor_formatter(mpl.ticker.FuncFormatter(lambda y, _: f"{y}"))
+        ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda y, _: f"{y:g}"))
+        ax.yaxis.set_minor_formatter(mpl.ticker.FuncFormatter(lambda y, _: f"{y:g}"))
 
 fig.savefig(osp.join(fig_path, f"mmill_{arch}_rho_dep_pc_loss.pdf"))
 
@@ -367,7 +357,7 @@ with plt.style.context(paper_style):
         # crt_lowest = long_wb_run.validation["prediction_error"][-1]
         # ax.axhline(crt_lowest, c="k")
 
-        ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda y, _: f"{y}"))
+        ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda y, _: f"{y:g}"))
 
 fig.savefig(osp.join(fig_path, f"mmill_{arch}_rho_dep_pred_err.pdf"))
 
