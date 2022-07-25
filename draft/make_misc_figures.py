@@ -1,16 +1,11 @@
 # %% [markdown]
 # # Make some miscellaneous figures
 
-import os
 import os.path as osp
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import seaborn as sns
-import pydove as dv
-
-import numpy as np
-import torch
 
 from cpcn import load_mnist
 

@@ -13,11 +13,10 @@ import pickle
 # %%
 
 contexts = [
-    "mnist_pcn_one",
-    "mnist_biopcn_one",
-    "mnist_pcn_two",
-    "mnist_biopcn_two",
-    "mnist_pcn_large-two",
+    "mnist_pcn_small_rho1.0",
+    "mnist_biopcn_small_rho1.0",
+    "mnist_pcn_large_rho1.0_0.1",
+    "mnist_biopcn_large_rho1.0_0.1",
 ]
 
 studies = {}
@@ -37,11 +36,11 @@ for context in contexts:
 # %% [markdown]
 # ## Show best parameters from each run
 
-pairs = [("lr", "lr_rate"), ("z_lr", "Q_lrf")]
+pairs = [("lr", "lr_decay"), ("z_lr", "Q_lrf")]
 for context, study_set in studies.items():
     param_values = {
         param: [_.best_params[param] for _ in study_set]
-        for param in ["z_lr", "lr", "lr_rate", "Q_lrf"]
+        for param in ["z_lr", "lr", "lr_decay", "Q_lrf"]
     }
     pc_loss = [_.best_value for _ in study_set]
 
