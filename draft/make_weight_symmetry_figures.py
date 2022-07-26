@@ -1,7 +1,6 @@
 # %% [markdown]
-# # Make figures for the dependence on constraint scale, Mediamill
+# # Make figures showing weight (a)symmetry
 
-import os
 import os.path as osp
 
 import matplotlib as mpl
@@ -9,12 +8,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pydove as dv
 
-import torch
 import numpy as np
 
 from tqdm.notebook import tqdm
-
-from typing import Tuple
 
 import pickle
 
@@ -72,12 +68,12 @@ fig_path = "figs"
 
 # %%
 
-context = "mnist_biopcn_large_small_rho1.0"
+context = "mnist_biopcn_large_rho1.0_0.1"
 name = osp.join("simulations", context, "checkpoints_700.pkl")
 with open(name, "rb") as f:
     checkpoints = pickle.load(f)
 
-model = checkpoints["model"][-1]
+model = checkpoints[-1]
 
 # %%
 
@@ -99,12 +95,13 @@ fig.savefig(osp.join(fig_path, "mnist_weight_asymmetry.pdf"))
 # %%
 
 # context = "mmill_biopcn_large_rho1.0"
-context = "mmill_biopcn_large_rho1.0_long"
+# context = "mmill_biopcn_large_rho1.0_long"
+context = "mmill_biopcn_large_rho1.0_0.1"
 name = osp.join("simulations", context, "checkpoints_700.pkl")
 with open(name, "rb") as f:
     checkpoints = pickle.load(f)
 
-model = checkpoints["model"][-1]
+model = checkpoints[-1]
 
 # %%
 
@@ -125,27 +122,27 @@ fig.savefig(osp.join(fig_path, "mmill_weight_asymmetry.pdf"))
 
 # %%
 
-all_arch = ["two", "two-big", "two-bigger", "two-biggest"]
+all_arch = ["many_10_5", "many_25_5"]
 all_datasets = ["mnist", "mmill"]
 
+rho_values = "0.5_0.05"
 models = {}
 for dataset in all_datasets:
     for arch in all_arch:
-        context = f"{dataset}_biopcn_{arch}_rho1.0_multi"
-        name = osp.join("simulations", context, "checkpoints_123.pkl")
+        context = f"{dataset}_biopcn_{arch}_rho{rho_values}"
+
+        name = osp.join("simulations", context, "checkpoints_100.pkl")
         with open(name, "rb") as f:
             checkpoints = pickle.load(f)
 
-        models[dataset, arch] = checkpoints["model"][-1]
+        models[dataset, arch] = checkpoints[-1]
 
 # %%
 
-# arch_list = ["two", "two-big", "two-bigger"]
-# arch_list = ["two-big", "two-bigger", "two-biggest"]
-arch_list = ["two", "two-bigger", "two-giant"]
+arch_list = all_arch
 with plt.style.context(paper_style):
     with dv.FigureManager(
-        1, 3, figsize=(5.5, 1.5), despine_kws={"offset": 2}, constrained_layout=True
+        1, 2, figsize=(3.5, 1.5), despine_kws={"offset": 2}, constrained_layout=True
     ) as (fig, axs):
         for i, ax in enumerate(axs):
             model = models["mmill", arch_list[i]]
@@ -162,7 +159,7 @@ with plt.style.context(paper_style):
 
 # %%
 
-arch_list = ["two", "two-big"]
+arch_list = all_arch
 with plt.style.context(paper_style):
     with dv.FigureManager(
         2, 2, figsize=(5.5, 4.0), despine_kws={"offset": 2}, constrained_layout=True
@@ -203,7 +200,7 @@ fig.savefig(osp.join(fig_path, "combined_weight_asymmetry.pdf"))
 
 # %%
 
-arch_list = ["two", "two-big"]
+arch_list = all_arch
 with plt.style.context(paper_style):
     with dv.FigureManager(
         1, 2, figsize=(5.5, 2.0), despine_kws={"offset": 2}, constrained_layout=True
