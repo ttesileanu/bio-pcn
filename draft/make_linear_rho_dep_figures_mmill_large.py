@@ -100,8 +100,7 @@ arch = "large"
 # very well chosen...
 convert = lambda x: f"{x:.1f}" if np.abs(x - np.round(x)) < 1e-8 else f"{x:g}"
 
-# all_rho = all_rho_small if arch == "small" else all_rho_large
-all_rho = all_rho_small
+all_rho = all_rho_small if arch == "small" else all_rho_large
 for algo in tqdm(all_algo, desc="algo"):
     contexts = {}
     base = f"mmill_{algo}_{arch}"
