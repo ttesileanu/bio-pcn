@@ -80,7 +80,6 @@ fig_path = "figs"
 
 # %%
 
-# all_arch = ["one", "two", "large-two", "large_small"]
 all_algo = ["wb", "pcn", "biopcn"]
 all_rho_small = {
     "pcn": [0.05, 0.1, 0.2, 0.5, 1.0, 2.5, 5.0],

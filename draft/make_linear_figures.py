@@ -281,9 +281,9 @@ for layer in range(len(crt_rho)):
             crt_quant_lim = int(10 * crt_lim) / 10
             cb.set_ticks([-crt_quant_lim, 0, crt_quant_lim])
 
-        fig.savefig(osp.join(fig_path, f"linear_large_small_constraint_{l}.pdf"))
+        fig.savefig(osp.join(fig_path, f"linear_large_constraint_{l}.pdf"))
         # fig.savefig(
-        #     osp.join(fig_path, f"linear_large_small_constraint_{l}.png"), dpi=600
+        #     osp.join(fig_path, f"linear_large_constraint_{l}.png"), dpi=600
         # )
 
 # %%
