@@ -60,22 +60,25 @@ def dot_accuracy(ns, net) -> float:
     return torch.mean(accuracy).item()
 
 
-def load_mnist(
+def load_supervised(
+    trainset,
+    testset,
     n_train: Optional[int] = None,
     n_validation: int = 0,
     n_test: Optional[int] = None,
     center: bool = True,
     normalize: bool = True,
     one_hot: bool = True,
-    cache_path: str = "data/",
     device: Optional[torch.device] = None,
     batch_size: int = 128,
     batch_size_val: int = 1000,
     batch_size_test: int = 1000,
     return_loaders: bool = True,
 ) -> dict:
-    """Load (parts of) the MNIST dataset and split out a validation set.
+    """Load (parts of) a torchvision supervised dataset and split out a validation set.
     
+    :param trainset: training set
+    :param testset: test set
     :param n_train: number of training sample to keep; default: all, except what is used
         for validation
     :param n_validation: number of validation samples; default: no validation set
@@ -96,9 +99,6 @@ def load_mnist(
         maps to either a data loader (if `return_loaders` is true), or a tuple of two
         tensors, one for input, one for labels
     """
-    trainset = torchvision.datasets.MNIST(cache_path, train=True, download=True)
-    testset = torchvision.datasets.MNIST(cache_path, train=False, download=True)
-
     traindata = trainset.data.float()
     testdata = testset.data.float()
 
@@ -149,6 +149,29 @@ def load_mnist(
             dataset[key] = (input, labels)
 
     return dataset
+
+
+def load_torchvision(name: str, cache_path: str = "data/", **kwargs) -> dict:
+    """Load a torchvision dataset.
+    
+    :param name: name of the dataset to load
+    :param cache_path: cache from where to load / where to store the dataset
+    :param **kwargs: additional eyword arguments are passed to `load_supervised()`
+    """
+    constructor = getattr(torchvision.datasets, name)
+    trainset = constructor(cache_path, train=True, download=True)
+    testset = constructor(cache_path, train=False, download=True)
+
+    return load_supervised(trainset, testset, **kwargs)
+
+
+def load_mnist(cache_path: str = "data/", **kwargs) -> dict:
+    """Load (parts of) the MNIST dataset and split out a validation set.
+    
+    :param cache_path: cache from where to load / where to store the dataset
+    :param **kwargs: additional eyword arguments are passed to `load_supervised()`
+    """
+    return load_torchvision("MNIST", cache_path, **kwargs)
 
 
 def load_csv(
