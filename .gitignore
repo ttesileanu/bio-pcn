@@ -6,3 +6,4 @@ cpcn.egg-info
 compare_to_old_code*
 deepbionet
 *.prof
+.DS_Store
