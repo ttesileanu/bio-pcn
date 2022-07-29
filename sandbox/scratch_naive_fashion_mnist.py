@@ -29,12 +29,11 @@ dataset = load_torchvision("FashionMNIST", n_validation=1000, device=device)
 # ## Train PCN
 
 # %%
-n_batches = 3000
+n_batches = 2000
 dims = [784, 30, 5, 10]
 z_it = 50
 z_lr = 0.062
-rho = 0.015
-# rho = 0.0012
+# z_lr = 0.062 * 2
 
 t0 = time.time()
 torch.manual_seed(123)
@@ -45,15 +44,16 @@ net = PCNetwork(
     z_lr=z_lr,
     z_it=z_it,
     variances=1.0,
-    constrained=True,
-    rho=rho,
+    constrained=False,
+    # rho=rho,
     bias=False,
 )
 net = net.to(device)
 
-optimizer = multi_lr(
-    torch.optim.SGD, net.parameter_groups(), lr_factors={"Q": 0.11}, lr=0.01
-)
+# optimizer = multi_lr(
+#     torch.optim.SGD, net.parameter_groups(), lr_factors={"Q": 0.11}, lr=0.01
+# )
+optimizer = torch.optim.SGD(net.parameters(), lr=0.01)
 lr_power = 1.0
 lr_rate = 4e-4
 scheduler = torch.optim.lr_scheduler.LambdaLR(
@@ -85,6 +85,10 @@ _ = show_learning_curves(results, var_names=("pc_loss", "prediction_error"))
 # %%
 z_it = 50
 z_lr = 0.13
+# z_lr = 0.13 * 2
+# rho = 0.015
+rho = 0.015 * 2
+# rho = 0.0012
 
 t0 = time.time()
 torch.manual_seed(123)
@@ -112,7 +116,10 @@ biopcn_net = LinearBioPCN(
 biopcn_net = biopcn_net.to(device)
 
 biopcn_optimizer = multi_lr(
-    torch.optim.SGD, biopcn_net.parameter_groups(), lr_factors={"Q": 3.5}, lr=0.003
+    torch.optim.SGD,
+    biopcn_net.parameter_groups(),
+    lr_factors={"Q": 3.5 * 2},
+    lr=0.003 * 4,
 )
 lr_power = 1.0
 lr_rate = 2e-4
