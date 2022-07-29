@@ -5,11 +5,14 @@ import pickle
 
 import torch
 import torchvision
+import torchvision.transforms as T
 
 import numpy as np
 import pandas as pd
 
-from typing import Optional, Union, Sequence
+from typing import Optional, Union, Sequence, Any
+
+from cpcn.lfw_wrapper import LFWSanitized
 
 
 def make_onehot(y) -> torch.Tensor:
@@ -188,6 +191,92 @@ def load_mnist(cache_path: str = "data/", **kwargs) -> dict:
     :param **kwargs: additional eyword arguments are passed to `load_supervised()`
     """
     return load_torchvision("MNIST", cache_path, **kwargs)
+
+
+def load_lfw(
+    cache_path: str = "data/",
+    n_train: Optional[int] = None,
+    n_validation: int = 0,
+    n_test: Optional[int] = None,
+    normalize: bool = True,
+    transform: Optional[Any] = None,
+    batch_size: int = 128,
+    batch_size_val: int = 1000,
+    batch_size_test: int = 1000,
+    test_as_validation: bool = True,
+) -> dict:
+    """Load (parts of) the LFWPairs dataset.
+    
+    :param cache_path: cache from where to load / where to store the datasets
+    :param n_train: number of training samples to keep; default: all, except what is
+        used for validation
+    :param n_validation: number of validation samples; default: no validation set
+    :param n_test: number of test samples; default: all of the test split
+    :param normalize: whether to center and normalize the samples by stdev
+    :param transform: transform to apply to the dataset; `ToTensor()`, flattening, and
+        normalization (if `normalize` is true) are applied automatically
+    :param batch_size: if `return_loaders` is true, this sets the batch size used
+    :param batch_size_val: if `return_loaders` is true, this sets the batch size for the
+        validation set
+    :param batch_size_test: if `return_loaders` is true, this sets the batch size for
+        the test set
+    :param test_as_validation: if true, use the test set as validation set; in this case
+        `n_validation` is assumed to be zero
+    :return: a dictionary with keys `"train"`, `"validation"`, `"test"`, each of which
+        maps to a data loader
+    """
+    transform_list = [T.ToTensor()]
+    if transform is not None:
+        transform_list = [transform] + transform_list
+    transform = T.Compose(transform_list)
+
+    trainset = LFWSanitized(
+        cache_path,
+        download=True,
+        split="Train",
+        normalize=normalize,
+        flatten=True,
+        transform=transform,
+    )
+    testset = LFWSanitized(
+        cache_path,
+        download=True,
+        split="Test",
+        normalize=normalize,
+        flatten=True,
+        transform=transform,
+    )
+
+    if test_as_validation:
+        n_validation = 0
+
+    if n_train is None:
+        n_train = len(trainset) - n_validation
+    if n_test is None:
+        n_test = len(testset)
+
+    final_trainset = torch.utils.data.Subset(trainset, range(n_train))
+    final_valset = torch.utils.data.Subset(
+        trainset, range(n_train, n_train + n_validation)
+    )
+    final_testset = torch.utils.data.Subset(testset, range(n_test))
+
+    dataset = {}
+    dataset["train"] = torch.utils.data.DataLoader(
+        final_trainset, batch_size=batch_size, shuffle=True
+    )
+    dataset["test"] = torch.utils.data.DataLoader(
+        final_testset, batch_size=batch_size_test, shuffle=False
+    )
+
+    if test_as_validation:
+        dataset["validation"] = dataset["test"]
+    else:
+        dataset["validation"] = torch.utils.data.DataLoader(
+            final_valset, batch_size=batch_size_val, shuffle=False
+        )
+
+    return dataset
 
 
 def load_csv(
