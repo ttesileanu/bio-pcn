@@ -36,7 +36,8 @@ dataset = load_torchvision(
 # ## Train PCN
 
 # %%
-n_batches = 250
+# n_batches = 250
+n_batches = 1000
 
 one_batch = next(iter(dataset["train"]))
 
@@ -90,7 +91,8 @@ _ = show_learning_curves(results, var_names=("pc_loss", "prediction_error"))
 # %%
 z_it = 50
 z_lr = 0.1
-rho = 0.0005
+# rho = 0.0005
+rho = [0.0005, 0.0005]
 
 t0 = time.time()
 torch.manual_seed(123)

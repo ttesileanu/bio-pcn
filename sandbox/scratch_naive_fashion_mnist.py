@@ -29,7 +29,7 @@ dataset = load_torchvision("FashionMNIST", n_validation=1000, device=device)
 # ## Train PCN
 
 # %%
-n_batches = 2000
+n_batches = 1000
 dims = [784, 30, 5, 10]
 z_it = 50
 z_lr = 0.062
