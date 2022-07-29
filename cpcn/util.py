@@ -10,6 +10,8 @@ from typing import Optional, Union, Sequence
 
 
 def make_onehot(y) -> torch.Tensor:
+    if not torch.is_tensor(y):
+        y = torch.LongTensor(y)
     y_oh = torch.FloatTensor(y.shape[0], y.max().item() + 1)
     y_oh.zero_()
     y_oh.scatter_(1, y.reshape(-1, 1), 1)
@@ -99,8 +101,14 @@ def load_supervised(
         maps to either a data loader (if `return_loaders` is true), or a tuple of two
         tensors, one for input, one for labels
     """
-    traindata = trainset.data.float()
-    testdata = testset.data.float()
+    if torch.is_tensor(trainset.data):
+        traindata = trainset.data.float()
+    else:
+        traindata = torch.FloatTensor(trainset.data)
+    if torch.is_tensor(testset.data):
+        testdata = testset.data.float()
+    else:
+        testdata = torch.FloatTensor(testset.data)
 
     # figure out normalization
     mu = torch.mean(traindata) if center else 0.0
@@ -151,16 +159,21 @@ def load_supervised(
     return dataset
 
 
-def load_torchvision(name: str, cache_path: str = "data/", **kwargs) -> dict:
+def load_torchvision(
+    name: str, cache_path: str = "data/", dataset_kws: Optional[dict] = None, **kwargs
+) -> dict:
     """Load a torchvision dataset.
     
     :param name: name of the dataset to load
     :param cache_path: cache from where to load / where to store the dataset
+    :param dataset_kws: additional keyword arguments to pass to dataset constructor
     :param **kwargs: additional eyword arguments are passed to `load_supervised()`
     """
+    dataset_kws = {} if dataset_kws is None else dataset_kws
+
     constructor = getattr(torchvision.datasets, name)
-    trainset = constructor(cache_path, train=True, download=True)
-    testset = constructor(cache_path, train=False, download=True)
+    trainset = constructor(cache_path, train=True, download=True, **dataset_kws)
+    testset = constructor(cache_path, train=False, download=True, **dataset_kws)
 
     return load_supervised(trainset, testset, **kwargs)
 
