@@ -11,34 +11,17 @@ import torch
 import numpy as np
 
 from cpcn import PCNetwork, LinearBioPCN, BioPCN, load_mnist, load_csv, Trainer, tqdmw
-from cpcn import dot_accuracy, one_hot_accuracy, multi_lr, get_constraint_diagnostics
+from cpcn import (
+    dot_accuracy,
+    one_hot_accuracy,
+    multi_lr,
+    get_constraint_diagnostics,
+    read_best_hyperparams,
+)
 
 import pickle
 
 from typing import Tuple
-
-
-def read_best_hyperparams(path: str, lr_scale: float) -> dict:
-    """Find best hyperparameters from a folder of optimization results."""
-    filenames = [
-        osp.join(path, f)
-        for f in os.listdir(path)
-        if f.startswith("hyper_")
-        and f.endswith(".pkl")
-        and osp.isfile(osp.join(path, f))
-    ]
-
-    best_value = np.inf
-    best_params = None
-    for name in filenames:
-        with open(name, "rb") as f:
-            study = pickle.load(f)
-            if study.best_value < best_value:
-                best_value = study.best_value
-                best_params = study.best_params
-
-    best_params["lr"] *= lr_scale
-    return best_params
 
 
 def create_net(algo: str, dims: list, rho: list, best_params: dict):

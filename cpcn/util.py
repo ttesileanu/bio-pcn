@@ -1,5 +1,8 @@
 """Define some utilities."""
 
+import os
+import pickle
+
 import torch
 import torchvision
 
@@ -383,3 +386,50 @@ def pretty_size(num: float, suffix: str = "B", multiplier: float = 1024.0) -> st
             return f"{num:3.1f}{unit}{suffix}"
         num /= multiplier
     return f"{num:.1f}T{suffix}"
+
+
+def read_best_hyperparams(
+    path: str,
+    lr_scale: float,
+    prefix: str = "hyper_",
+    extension: str = ".pkl",
+    return_best_value: bool = False,
+) -> dict:
+    """Find best hyperparameters from a folder of optimization results.
+    
+    This finds all the files in `path` that start with `"hyper_"` and have extension
+    `.pkl`, loads them (assuming they are pickeld Optuna studies), and identifies the
+    set of parameters with the lowest `best_value`. (The prefix and extension can be
+    configured; see below).
+
+    :param path: path where to look for hyperparameter optimization files
+    :param lr_scale: factor by which to multiply the learning rate; this helps as a
+        safety margin to avoid divergences
+    :param prefix: prefix to use for the file names instead of `"hyper_"`
+    :param extension: extension to use instead of `.pkl`
+    :param return_best_value: if true, a `"best_value"` key is included in the return
+        dictionary indicating the best value reached during optimization
+    :return: dictionary of parameters yielding best performance
+    """
+    filenames = [
+        os.path.join(path, f)
+        for f in os.listdir(path)
+        if f.startswith(prefix)
+        and f.endswith(extension)
+        and os.path.isfile(os.path.join(path, f))
+    ]
+
+    best_value = np.inf
+    best_params = None
+    for name in filenames:
+        with open(name, "rb") as f:
+            study = pickle.load(f)
+            if study.best_value < best_value:
+                best_value = study.best_value
+                best_params = study.best_params
+
+    if return_best_value:
+        best_params["best_value"] = best_value
+
+    best_params["lr"] *= lr_scale
+    return best_params
