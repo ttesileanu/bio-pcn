@@ -1,0 +1,30 @@
+./run_once_extra.sh fashionmnist 700 wb 30 5
+./run_once_extra.sh fashionmnist 701 wb 30 5
+./run_once_extra.sh fashionmnist 702 wb 30 5
+./run_once_extra.sh fashionmnist 703 wb 30 5
+./run_once_extra.sh fashionmnist 704 wb 30 5
+./run_once_extra.sh fashionmnist 705 wb 30 5
+./run_once_extra.sh fashionmnist 706 wb 30 5
+./run_once_extra.sh fashionmnist 707 wb 30 5
+./run_once_extra.sh fashionmnist 708 wb 30 5
+./run_once_extra.sh fashionmnist 709 wb 30 5
+./run_once_extra.sh fashionmnist 700 pcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 701 pcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 702 pcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 703 pcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 704 pcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 705 pcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 706 pcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 707 pcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 708 pcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 709 pcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 700 biopcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 701 biopcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 702 biopcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 703 biopcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 704 biopcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 705 biopcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 706 biopcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 707 biopcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 708 biopcn 30 5 0.03 0.03
+./run_once_extra.sh fashionmnist 709 biopcn 30 5 0.03 0.03

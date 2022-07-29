@@ -10,7 +10,15 @@ import time
 import torch
 import numpy as np
 
-from cpcn import PCNetwork, LinearBioPCN, BioPCN, load_mnist, load_csv, Trainer, tqdmw
+from cpcn import (
+    PCNetwork,
+    LinearBioPCN,
+    BioPCN,
+    load_torchvision,
+    load_csv,
+    Trainer,
+    tqdmw,
+)
 from cpcn import (
     dot_accuracy,
     one_hot_accuracy,
@@ -150,7 +158,9 @@ if __name__ == "__main__":
         "looking for hyper_*.pkl files in ${hyperdir}/"
         "${dataset}_${algo}_${arch}[_${rho}]/",
     )
-    parser.add_argument("dataset", help="dataset: mnist or mmill")
+    parser.add_argument(
+        "dataset", help="dataset: mnist, mmill, fashionmnist, cifar10, cifar100"
+    )
     parser.add_argument("algo", help="algorithm: pcn, biopcn, biopcn-nl, wb")
     parser.add_argument("arch", help="architecture: small or many_n1[_n2[...]]")
     parser.add_argument("seed", type=int, help="starting random number seed")
@@ -191,9 +201,19 @@ if __name__ == "__main__":
     t0 = time.time()
 
     # load dataset
-    if args.dataset == "mnist":
-        dataset = load_mnist(
-            n_validation=args.n_validation, batch_size=args.batch_size, device=device
+    tv_mapping = {
+        "mnist": "MNIST",
+        "fashionmnist": "FashionMNIST",
+        "cifar10": "CIFAR10",
+        "cifar100": "CIFAR100",
+    }
+    if args.dataset in tv_mapping.keys():
+        tv_dataset = tv_mapping[args.dataset]
+        dataset = load_torchvision(
+            tv_dataset,
+            n_validation=args.n_validation,
+            batch_size=args.batch_size,
+            device=device,
         )
         accuracy_fct = one_hot_accuracy
     elif args.dataset == "mmill":
