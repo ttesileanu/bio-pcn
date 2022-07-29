@@ -428,8 +428,11 @@ def read_best_hyperparams(
                 best_value = study.best_value
                 best_params = study.best_params
 
-    if return_best_value:
-        best_params["best_value"] = best_value
+    if best_params is not None:
+        if return_best_value:
+            best_params["best_value"] = best_value
 
-    best_params["lr"] *= lr_scale
+        if "lr" in best_params:
+            best_params["lr"] *= lr_scale
+
     return best_params
