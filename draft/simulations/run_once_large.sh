@@ -2,7 +2,7 @@
 
 source ~/.bashrc
 
-# run_once <seed> <dataset> <algo> <rho1> <rho2>
+# run_once_large <seed> <dataset> <algo> <rho1> <rho2>
 
 seed=$1
 dataset=$2

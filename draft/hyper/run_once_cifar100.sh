@@ -2,7 +2,7 @@
 
 source ~/.bashrc
 
-# run_once_fashion_mnist <seed> <algo> <hidden1> <hidden2> <rho1> <rho2>
+# run_once_cifar100 <seed> <algo> <hidden1> <hidden2> <rho1> <rho2>
 
 seed=$1
 algo=$2
