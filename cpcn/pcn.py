@@ -314,7 +314,7 @@ class PCNetwork(object):
         (after zeroing all the gradients) *and flipping the sign for the gradient of
         the `Q` parameters* (if `self.constrained` is true). The latter is because the
         optimization needs to maximize over `Q` while minimizing over all the other
-        paramters.
+        parameters.
 
         :param fast: namespace containing values of latent variables in each layer
             (under `fast.z`)
