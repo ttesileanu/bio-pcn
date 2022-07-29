@@ -1,0 +1,30 @@
+./run_once_cifar100.sh 100 wb 30 5
+./run_once_cifar100.sh 101 wb 30 5
+./run_once_cifar100.sh 102 wb 30 5
+./run_once_cifar100.sh 103 wb 30 5
+./run_once_cifar100.sh 104 wb 30 5
+./run_once_cifar100.sh 105 wb 30 5
+./run_once_cifar100.sh 106 wb 30 5
+./run_once_cifar100.sh 107 wb 30 5
+./run_once_cifar100.sh 108 wb 30 5
+./run_once_cifar100.sh 109 wb 30 5
+./run_once_cifar100.sh 100 pcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 101 pcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 102 pcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 103 pcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 104 pcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 105 pcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 106 pcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 107 pcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 108 pcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 109 pcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 100 biopcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 101 biopcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 102 biopcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 103 biopcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 104 biopcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 105 biopcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 106 biopcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 107 biopcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 108 biopcn 30 5 0.0005 0.0005
+./run_once_cifar100.sh 109 biopcn 30 5 0.0005 0.0005
