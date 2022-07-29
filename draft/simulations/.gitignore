@@ -11,4 +11,6 @@ mnist_wb_*
 mnist_biopcn_*
 mnist_biopcn-nl_*
 mmill_pcn_*
+mmill_biopcn_*
+mmill_wb_*
 *_old.sh
