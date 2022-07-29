@@ -7,7 +7,7 @@ import time
 from functools import partial
 
 import torch
-from cpcn import PCNetwork, LinearBioPCN, BioPCN, load_mnist, load_csv, Trainer
+from cpcn import PCNetwork, LinearBioPCN, BioPCN, load_csv, load_torchvision, Trainer
 from cpcn import dot_accuracy, one_hot_accuracy, multi_lr
 
 import optuna
@@ -121,7 +121,7 @@ def objective(
         trainer = Trainer(dataset["train"], invalid_action="warn+stop")
         trainer.metrics["accuracy"] = accuracy_fct
         for batch in trainer(n_batches):
-            if batch.every(10):
+            if batch.count(5):
                 batch.evaluate(dataset["validation"]).run(net)
 
             batch.feed(net)
@@ -139,11 +139,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run hyperparameter optimization")
 
     parser.add_argument("out", help="output file")
-    parser.add_argument("dataset", help="dataset: mnist or mmill")
+    parser.add_argument(
+        "dataset", help="dataset: mnist, mmill, fashionmnist, cifar10, cifar100"
+    )
     parser.add_argument("algo", help="algorithm: pcn, biopcn, biopcn-nl, wb")
     parser.add_argument("arch", help="architecture: small or many_n1[_n2[...]]")
     parser.add_argument("trials", type=int, help="number of trials")
     parser.add_argument("seed", type=int, help="starting random number seed")
+
+    parser.add_argument(
+        "--cuda", action="store_true", default="false", help="use CUDA if available"
+    )
 
     parser.add_argument(
         "--rho", type=float, nargs="+", default=1.0, help="constraint magnitudes"
@@ -178,13 +184,25 @@ if __name__ == "__main__":
 
     torch.set_num_threads(1)
 
-    # harder to find cluster nodes for GPU, so using CPU for all models
-    device = torch.device("cpu")
+    if not args.cuda:
+        # harder to find cluster nodes for GPU, so using CPU for all models
+        device = torch.device("cpu")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"device: {device}")
 
     t0 = time.time()
-    if args.dataset == "mnist":
-        dataset = load_mnist(n_validation=500, batch_size=100, device=device)
+    tv_mapping = {
+        "mnist": "MNIST",
+        "fashionmnist": "FashionMNIST",
+        "cifar10": "CIFAR10",
+        "cifar100": "CIFAR100",
+    }
+    if args.dataset in tv_mapping.keys():
+        tv_dataset = tv_mapping[args.dataset]
+        dataset = load_torchvision(
+            tv_dataset, n_validation=500, batch_size=100, device=device
+        )
         accuracy_fct = one_hot_accuracy
     elif args.dataset == "mmill":
         data_path = os.path.join("data", "mediamill")
