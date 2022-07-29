@@ -7,8 +7,10 @@ import time
 from functools import partial
 
 import torch
+import torchvision.transforms as T
+
 from cpcn import PCNetwork, LinearBioPCN, BioPCN, load_csv, load_torchvision, Trainer
-from cpcn import dot_accuracy, one_hot_accuracy, multi_lr
+from cpcn import dot_accuracy, one_hot_accuracy, multi_lr, load_lfw
 
 import optuna
 from optuna.trial import TrialState
@@ -86,7 +88,7 @@ def objective(
     algo: str,
     dims: list,
     rho: list,
-    accuracy_fct: Callable,
+    accuracy_fct: Optional[Callable],
     constraint: bool,
     z_lr_range: tuple,
     lr_range: tuple,
@@ -119,7 +121,8 @@ def objective(
         )
 
         trainer = Trainer(dataset["train"], invalid_action="warn+stop")
-        trainer.metrics["accuracy"] = accuracy_fct
+        if accuracy_fct is not None:
+            trainer.metrics["accuracy"] = accuracy_fct
         for batch in trainer(n_batches):
             if batch.count(5):
                 batch.evaluate(dataset["validation"]).run(net)
@@ -140,7 +143,7 @@ if __name__ == "__main__":
 
     parser.add_argument("out", help="output file")
     parser.add_argument(
-        "dataset", help="dataset: mnist, mmill, fashionmnist, cifar10, cifar100"
+        "dataset", help="dataset: mnist, mmill, fashionmnist, cifar10, cifar100, lfw"
     )
     parser.add_argument("algo", help="algorithm: pcn, biopcn, biopcn-nl, wb")
     parser.add_argument("arch", help="architecture: small or many_n1[_n2[...]]")
@@ -148,7 +151,7 @@ if __name__ == "__main__":
     parser.add_argument("seed", type=int, help="starting random number seed")
 
     parser.add_argument(
-        "--cuda", action="store_true", default="false", help="use CUDA if available"
+        "--cuda", action="store_true", default=False, help="use CUDA if available"
     )
 
     parser.add_argument(
@@ -214,6 +217,11 @@ if __name__ == "__main__":
             device=device,
         )
         accuracy_fct = dot_accuracy
+    elif args.dataset == "lfw":
+        transform = T.Compose([T.Grayscale(), T.Resize(size=22), T.CenterCrop(15)])
+        # for LFW validation set is set to test set by default
+        dataset = load_lfw(transform=transform, n_test=500, batch_size=100)
+        accuracy_fct = None
     else:
         raise ValueError(f"unknown dataset, {args.dataset}")
 
@@ -230,7 +238,10 @@ if __name__ == "__main__":
     print(f"rho: {args.rho}")
 
     if hasattr(args.rho, "__len__"):
-        assert len(args.rho) == len(hidden_dims)
+        if len(args.rho) == 1:
+            args.rho = args.rho * len(hidden_dims)
+        else:
+            assert len(args.rho) == len(hidden_dims)
 
     sampler = optuna.samplers.TPESampler(seed=args.seed)
     study = optuna.create_study(direction="minimize", sampler=sampler)

@@ -1,0 +1,30 @@
+./run_once_lfw.sh 100 wb
+./run_once_lfw.sh 101 wb
+./run_once_lfw.sh 102 wb
+./run_once_lfw.sh 103 wb
+./run_once_lfw.sh 104 wb
+./run_once_lfw.sh 105 wb
+./run_once_lfw.sh 106 wb
+./run_once_lfw.sh 107 wb
+./run_once_lfw.sh 108 wb
+./run_once_lfw.sh 109 wb
+./run_once_lfw.sh 100 pcn 0.015
+./run_once_lfw.sh 101 pcn 0.015
+./run_once_lfw.sh 102 pcn 0.015
+./run_once_lfw.sh 103 pcn 0.015
+./run_once_lfw.sh 104 pcn 0.015
+./run_once_lfw.sh 105 pcn 0.015
+./run_once_lfw.sh 106 pcn 0.015
+./run_once_lfw.sh 107 pcn 0.015
+./run_once_lfw.sh 108 pcn 0.015
+./run_once_lfw.sh 109 pcn 0.015
+./run_once_lfw.sh 100 biopcn 0.015
+./run_once_lfw.sh 101 biopcn 0.015
+./run_once_lfw.sh 102 biopcn 0.015
+./run_once_lfw.sh 103 biopcn 0.015
+./run_once_lfw.sh 104 biopcn 0.015
+./run_once_lfw.sh 105 biopcn 0.015
+./run_once_lfw.sh 106 biopcn 0.015
+./run_once_lfw.sh 107 biopcn 0.015
+./run_once_lfw.sh 108 biopcn 0.015
+./run_once_lfw.sh 109 biopcn 0.015
