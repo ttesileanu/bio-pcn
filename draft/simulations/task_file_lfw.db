@@ -1,0 +1,30 @@
+./run_once_lfw.sh 700 wb
+./run_once_lfw.sh 701 wb
+./run_once_lfw.sh 702 wb
+./run_once_lfw.sh 703 wb
+./run_once_lfw.sh 704 wb
+./run_once_lfw.sh 705 wb
+./run_once_lfw.sh 706 wb
+./run_once_lfw.sh 707 wb
+./run_once_lfw.sh 708 wb
+./run_once_lfw.sh 709 wb
+./run_once_lfw.sh 700 pcn 0.015
+./run_once_lfw.sh 701 pcn 0.015
+./run_once_lfw.sh 702 pcn 0.015
+./run_once_lfw.sh 703 pcn 0.015
+./run_once_lfw.sh 704 pcn 0.015
+./run_once_lfw.sh 705 pcn 0.015
+./run_once_lfw.sh 706 pcn 0.015
+./run_once_lfw.sh 707 pcn 0.015
+./run_once_lfw.sh 708 pcn 0.015
+./run_once_lfw.sh 709 pcn 0.015
+./run_once_lfw.sh 700 biopcn 0.015
+./run_once_lfw.sh 701 biopcn 0.015
+./run_once_lfw.sh 702 biopcn 0.015
+./run_once_lfw.sh 703 biopcn 0.015
+./run_once_lfw.sh 704 biopcn 0.015
+./run_once_lfw.sh 705 biopcn 0.015
+./run_once_lfw.sh 706 biopcn 0.015
+./run_once_lfw.sh 707 biopcn 0.015
+./run_once_lfw.sh 708 biopcn 0.015
+./run_once_lfw.sh 709 biopcn 0.015

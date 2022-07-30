@@ -8,6 +8,7 @@ import argparse
 import time
 
 import torch
+import torchvision.transforms as T
 import numpy as np
 
 from cpcn import (
@@ -16,6 +17,7 @@ from cpcn import (
     BioPCN,
     load_torchvision,
     load_csv,
+    load_lfw,
     Trainer,
     tqdmw,
 )
@@ -108,7 +110,8 @@ def run_simulation(
     )
 
     trainer = Trainer(dataset["train"], invalid_action="warn+stop")
-    trainer.metrics["accuracy"] = accuracy_fct
+    if accuracy_fct is not None:
+        trainer.metrics["accuracy"] = accuracy_fct
 
     # figure out which parameters to monitor
     if hasattr(net, "W_a"):
@@ -159,7 +162,7 @@ if __name__ == "__main__":
         "${dataset}_${algo}_${arch}[_${rho}]/",
     )
     parser.add_argument(
-        "dataset", help="dataset: mnist, mmill, fashionmnist, cifar10, cifar100"
+        "dataset", help="dataset: mnist, mmill, fashionmnist, cifar10, cifar100, lfw"
     )
     parser.add_argument("algo", help="algorithm: pcn, biopcn, biopcn-nl, wb")
     parser.add_argument("arch", help="architecture: small or many_n1[_n2[...]]")
@@ -226,6 +229,11 @@ if __name__ == "__main__":
             device=device,
         )
         accuracy_fct = dot_accuracy
+    elif args.dataset == "lfw":
+        transform = T.Compose([T.Grayscale(), T.Resize(size=22), T.CenterCrop(15)])
+        # for LFW validation set is set to test set by default
+        dataset = load_lfw(transform=transform, n_test=500, batch_size=100)
+        accuracy_fct = None
     else:
         raise ValueError(f"unknown dataset, {args.dataset}")
 
@@ -242,9 +250,14 @@ if __name__ == "__main__":
     print(f"network dims: {dims}")
     print(f"rho: {args.rho}")
 
+    original_rho = args.rho
     if hasattr(args.rho, "__len__"):
-        assert len(args.rho) == len(hidden_dims)
+        if len(args.rho) == 1:
+            args.rho = args.rho * len(hidden_dims)
+        else:
+            assert len(args.rho) == len(hidden_dims)
     else:
+        original_rho = [original_rho]
         args.rho = len(hidden_dims) * [args.rho]
 
     # create network using parameters from hyperparam optimization
@@ -256,7 +269,7 @@ if __name__ == "__main__":
         # unfortunately the naming convention for the hyperparam optimization wasn't
         # very well chosen...
         convert = lambda x: f"{x:.1f}" if np.abs(x - np.round(x)) < 1e-8 else f"{x:g}"
-        rho_part = "_rho" + "_".join(convert(_) for _ in args.rho)
+        rho_part = "_rho" + "_".join(convert(_) for _ in original_rho)
     subfolder = f"{args.dataset}_{args.algo}_{args.arch_alias}{rho_part}"
     folder = osp.join(args.hyperdir, subfolder)
     print(f"looking for hyperparameters in {folder}...")
