@@ -147,12 +147,18 @@ def make_plot(
 
 # %%
 
-all_datasets = ["fashionmnist", "cifar10", "cifar100"]
+all_datasets = ["fashionmnist", "cifar10", "cifar100", "lfw"]
 all_algo = ["wb", "pcn", "biopcn"]
 all_histories = {}
 
-arch = "many_30_5"
+all_arch = {
+    "fashionmnist": "many_30_5",
+    "cifar10": "many_30_5",
+    "cifar100": "many_30_5",
+    "lfw": "many_20_5_20",
+}
 for dataset in tqdm(all_datasets, desc="dataset"):
+    arch = all_arch[dataset]
     contexts = {}
     for algo in all_algo:
         value = f"{dataset}_{algo}_{arch}"
@@ -245,6 +251,18 @@ with open(name, "rb") as f:
     crt_cons_diag = crt_history.constraint
 
 crt_rho = [0.0005, 0.0005]
+_ = show_constraint_diagnostics(crt_cons_diag, layer=1, rho=crt_rho[0])
+_ = show_constraint_diagnostics(crt_cons_diag, layer=2, rho=crt_rho[1])
+
+
+# %%
+
+name = osp.join("simulations", "lfw_biopcn_many_20_5_20_rho0.015", "history_700.pkl")
+with open(name, "rb") as f:
+    crt_history = pickle.load(f)
+    crt_cons_diag = crt_history.constraint
+
+crt_rho = [0.015, 0.015]
 _ = show_constraint_diagnostics(crt_cons_diag, layer=1, rho=crt_rho[0])
 _ = show_constraint_diagnostics(crt_cons_diag, layer=2, rho=crt_rho[1])
 
