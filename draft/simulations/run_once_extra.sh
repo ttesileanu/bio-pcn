@@ -14,7 +14,6 @@ rho2=$7
 
 arch="many_${hidden1}_${hidden2}"
 
-trials=500
 if [ "${algo}" = "wb" ]; then
     folder="${dataset}_${algo}_${arch}"
     rho_args=""
