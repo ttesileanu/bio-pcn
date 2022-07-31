@@ -45,6 +45,13 @@ class Batch:
         :return: namespace returned by `net.relax()`, augmented to also contain the
             batch's `x` and `y`
         """
+        # send the batch to the right device
+        some_param = next(iter(net.parameters()))
+        device = some_param.device
+
+        self.x = self.x.to(device)
+        self.y = self.y.to(device)
+
         # run fast dynamics
         res = net.relax(self.x, self.y, **kwargs)
         res.x = self.x
