@@ -20,8 +20,18 @@ import pickle
 from typing import Callable, Optional
 
 
-def create_net(algo: str, dims: list, rho: list, trial, z_lr_range: tuple):
+def create_net(
+    algo: str,
+    dims: list,
+    rho: list,
+    trial,
+    z_lr_range: tuple,
+    rho_sweep: Optional[tuple] = None,
+):
     z_lr = trial.suggest_float("z_lr", z_lr_range[0], z_lr_range[1], log=True)
+
+    if rho_sweep is not None:
+        rho = trial.suggest_float("rho", *rho_sweep, log=True)
 
     kwargs = {"z_lr": z_lr, "z_it": 50, "rho": rho}
     if algo == "pcn":
@@ -92,9 +102,10 @@ def objective(
     constraint: bool,
     z_lr_range: tuple,
     lr_range: tuple,
-    lr_decay_range: tuple,
+    lr_decay_range: Optional[tuple],
     Q_lrf_range: tuple,
     Wa_lrf_range: Optional[tuple],
+    rho_sweep: Optional[tuple],
 ) -> float:
     torch.manual_seed(seed)
     seed0 = torch.randint(0, 2_000_000_000, (1,)).item()
@@ -102,10 +113,15 @@ def objective(
     scores = torch.zeros(n_rep)
     for i in range(n_rep):
         torch.manual_seed(seed0 + i)
-        net = create_net(algo, dims, rho, trial, z_lr_range).to(device)
+        net = create_net(algo, dims, rho, trial, z_lr_range, rho_sweep=rho_sweep).to(
+            device
+        )
 
         lr = trial.suggest_float("lr", *lr_range, log=True)
-        lr_decay = trial.suggest_float("lr_decay", *lr_decay_range, log=True)
+        if lr_decay_range is not None:
+            lr_decay = trial.suggest_float("lr_decay", *lr_decay_range, log=True)
+        else:
+            lr_decay = 0.0
 
         lr_factors = {}
         if constraint:
@@ -179,11 +195,24 @@ if __name__ == "__main__":
     parser.add_argument(
         "--Wa-lrf", type=float, nargs=2, default=None, help="range for Wa_lrf"
     )
+    parser.add_argument(
+        "--rho-sweep",
+        type=float,
+        nargs=2,
+        default=None,
+        help="sweep range for rho; default: don't sweep, use value from --rho",
+    )
+    parser.add_argument(
+        "--no-lr-decay", action="store_true", default=False, help="fix lr_decay to 0"
+    )
 
     args = parser.parse_args()
 
     print(f"{args.algo} on {args.dataset} for {args.trials} trials; seed {args.seed}")
     print(f"n_batches: {args.n_batches}, n_rep: {args.n_rep}")
+
+    if args.no_lr_decay:
+        args.lr_decay = None
 
     torch.set_num_threads(1)
 
@@ -203,9 +232,7 @@ if __name__ == "__main__":
     }
     if args.dataset in tv_mapping.keys():
         tv_dataset = tv_mapping[args.dataset]
-        dataset = load_torchvision(
-            tv_dataset, n_validation=500, batch_size=100, device=device
-        )
+        dataset = load_torchvision(tv_dataset, n_validation=500, batch_size=100)
         accuracy_fct = one_hot_accuracy
     elif args.dataset == "mmill":
         data_path = os.path.join("data", "mediamill")
@@ -214,7 +241,6 @@ if __name__ == "__main__":
             os.path.join(data_path, "view2.csv"),
             n_validation=500,
             batch_size=100,
-            device=device,
         )
         accuracy_fct = dot_accuracy
     elif args.dataset == "lfw":
@@ -235,13 +261,17 @@ if __name__ == "__main__":
     one_sample = next(iter(dataset["train"]))
     dims = [one_sample[0].shape[-1]] + hidden_dims + [one_sample[1].shape[-1]]
     print(f"network dims: {dims}")
-    print(f"rho: {args.rho}")
 
-    if hasattr(args.rho, "__len__"):
-        if len(args.rho) == 1:
-            args.rho = args.rho * len(hidden_dims)
-        else:
-            assert len(args.rho) == len(hidden_dims)
+    if args.rho_sweep is None:
+        print(f"rho: {args.rho}")
+
+        if hasattr(args.rho, "__len__"):
+            if len(args.rho) == 1:
+                args.rho = args.rho * len(hidden_dims)
+            else:
+                assert len(args.rho) == len(hidden_dims)
+    else:
+        print(f"sweeping rho in range: {args.rho_sweep}")
 
     sampler = optuna.samplers.TPESampler(seed=args.seed)
     study = optuna.create_study(direction="minimize", sampler=sampler)
@@ -262,6 +292,7 @@ if __name__ == "__main__":
             lr_decay_range=args.lr_decay,
             Q_lrf_range=args.Q_lrf,
             Wa_lrf_range=args.Wa_lrf,
+            rho_sweep=args.rho_sweep,
             device=device,
         ),
         n_trials=args.trials,

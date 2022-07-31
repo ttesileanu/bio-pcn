@@ -1,0 +1,11 @@
+*.pkl
+err_*.txt
+out_*.txt
+task_file*.db_disBatch_*
+slurm-*.out
+slurm_job_*.*sh
+mnist_pcn_*
+mnist_wb_*
+mnist_biopcn_*
+mnist_biopcn-nl_*
+mmill_pcn_*
