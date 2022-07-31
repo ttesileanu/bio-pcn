@@ -213,10 +213,7 @@ if __name__ == "__main__":
     if args.dataset in tv_mapping.keys():
         tv_dataset = tv_mapping[args.dataset]
         dataset = load_torchvision(
-            tv_dataset,
-            n_validation=args.n_validation,
-            batch_size=args.batch_size,
-            device=device,
+            tv_dataset, n_validation=args.n_validation, batch_size=args.batch_size
         )
         accuracy_fct = one_hot_accuracy
     elif args.dataset == "mmill":
@@ -226,7 +223,6 @@ if __name__ == "__main__":
             os.path.join(data_path, "view2.csv"),
             n_validation=args.n_validation,
             batch_size=args.batch_size,
-            device=device,
         )
         accuracy_fct = dot_accuracy
     elif args.dataset == "lfw":

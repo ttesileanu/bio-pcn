@@ -27,7 +27,7 @@ seed = 123
 torch.manual_seed(seed)
 
 # get train, validation, and test loaders for MNIST
-dataset = load_mnist(n_validation=1000, device=device)
+dataset = load_mnist(n_validation=1000)
 
 # %% [markdown]
 # ## Try PCN without constraint

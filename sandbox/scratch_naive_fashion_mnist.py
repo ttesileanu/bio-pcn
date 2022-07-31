@@ -23,7 +23,7 @@ device = torch.device("cpu")
 torch.manual_seed(123)
 
 # get train, validation, and test loaders for FashionMNIST
-dataset = load_torchvision("FashionMNIST", n_validation=1000, device=device)
+dataset = load_torchvision("FashionMNIST", n_validation=1000)
 
 # %% [markdown]
 # ## Train PCN

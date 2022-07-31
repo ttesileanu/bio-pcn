@@ -24,7 +24,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.manual_seed(123)
 
 # get train, validation, and test loaders for MNIST
-dataset = load_mnist(n_validation=500, device=device)
+dataset = load_mnist(n_validation=500)
 
 # %% [markdown]
 # ## Train PCN

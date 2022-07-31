@@ -23,7 +23,7 @@ device = torch.device("cpu")
 torch.manual_seed(123)
 
 # get train, validation, and test loaders for MNIST
-dataset = load_mnist(n_validation=1000, device=device)
+dataset = load_mnist(n_validation=1000)
 
 # %% [markdown]
 # ## Train PCN

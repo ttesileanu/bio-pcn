@@ -27,7 +27,7 @@ torch.manual_seed(123)
 
 # get train, validation, and test loaders for MNIST
 batch_size = 100
-dataset = load_mnist(n_validation=1000, batch_size=batch_size, device=device)
+dataset = load_mnist(n_validation=1000, batch_size=batch_size)
 
 # %% [markdown]
 # ## Train PCN

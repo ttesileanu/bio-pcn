@@ -26,10 +26,7 @@ torch.manual_seed(123)
 
 # get train, validation, and test loaders for FashionMNIST
 dataset = load_torchvision(
-    "CIFAR10",
-    n_validation=1000,
-    dataset_kws={"transform": transforms.ToTensor()},
-    device=device,
+    "CIFAR10", n_validation=1000, dataset_kws={"transform": transforms.ToTensor()}
 )
 
 # %% [markdown]

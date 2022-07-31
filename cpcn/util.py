@@ -77,7 +77,6 @@ def load_supervised(
     center: bool = True,
     normalize: bool = True,
     one_hot: bool = True,
-    device: Optional[torch.device] = None,
     batch_size: int = 128,
     batch_size_val: int = 1000,
     batch_size_test: int = 1000,
@@ -95,7 +94,6 @@ def load_supervised(
     :param normalize: whether to normalize the samples such that the stdev is 1
     :param one_hot: whether to convert the labels to a one-hot encoding
     :param cache_path: cache from where to load / where to store the datasets
-    :param device: device to send the data to
     :param batch_size: if `return_loaders` is true, this sets the batch size used
     :param batch_size_val: if `return_loaders` is true, this sets the batch size for the
         validation set
@@ -143,9 +141,6 @@ def load_supervised(
         input = (scale * (input - mu)).reshape(len(input), -1)
         if one_hot:
             labels = make_onehot(labels)
-        if device is not None:
-            input = input.to(device)
-            labels = labels.to(device)
 
         if return_loaders:
             batch_size_dict = {
@@ -286,7 +281,6 @@ def load_csv(
     n_validation: int = 0,
     center: bool = True,
     normalize: bool = True,
-    device: Optional[torch.device] = None,
     batch_size: int = 128,
     batch_size_val: int = 1000,
     return_loaders: bool = True,
@@ -302,7 +296,6 @@ def load_csv(
     :param n_validation: number of validation samples; default: no validation set
     :param center: whether to center the samples such that the mean is 0
     :param normalize: whether to normalize the samples such that the stdev is 1
-    :param device: device to send the data to
     :param batch_size: if `return_loaders` is true, this sets the batch size used
     :param batch_size_val: if `return_loaders` is true, this sets the batch size for the
         validation set
@@ -374,9 +367,6 @@ def load_csv(
     for key, (input, output) in dataset.items():
         input = scale_in * (input - mu_in)
         output = scale_out * (output - mu_out)
-        if device is not None:
-            input = input.to(device)
-            output = output.to(device)
 
         if return_loaders:
             batch_size_dict = {

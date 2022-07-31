@@ -15,7 +15,7 @@ device = torch.device("cpu")
 torch.manual_seed(123)
 
 batch_size = 100
-dataset = load_mnist(n_validation=500, batch_size=batch_size, device=device)
+dataset = load_mnist(n_validation=500, batch_size=batch_size)
 
 # create net, run training
 n_batches = 2000

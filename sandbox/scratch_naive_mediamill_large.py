@@ -33,7 +33,6 @@ dataset = load_csv(
     osp.join(path, "view2.csv"),
     n_validation=1000,
     batch_size=batch_size,
-    device=device,
 )
 
 # %% [markdown]
