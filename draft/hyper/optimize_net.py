@@ -27,11 +27,17 @@ def create_net(
     trial,
     z_lr_range: tuple,
     rho_sweep: Optional[tuple] = None,
+    per_layer_rho: bool = False,
 ):
     z_lr = trial.suggest_float("z_lr", z_lr_range[0], z_lr_range[1], log=True)
 
     if rho_sweep is not None:
-        rho = trial.suggest_float("rho", *rho_sweep, log=True)
+        if not per_layer_rho:
+            rho = trial.suggest_float("rho", *rho_sweep, log=True)
+        else:
+            rho = []
+            for i in range(len(dims) - 2):
+                rho.append(trial.suggest_float(f"rho_{i+1}", *rho_sweep, log=True))
 
     kwargs = {"z_lr": z_lr, "z_it": 50, "rho": rho}
     if algo == "pcn":
@@ -106,6 +112,7 @@ def objective(
     Q_lrf_range: tuple,
     Wa_lrf_range: Optional[tuple],
     rho_sweep: Optional[tuple],
+    per_layer_rho: bool,
 ) -> float:
     torch.manual_seed(seed)
     seed0 = torch.randint(0, 2_000_000_000, (1,)).item()
@@ -113,9 +120,15 @@ def objective(
     scores = torch.zeros(n_rep)
     for i in range(n_rep):
         torch.manual_seed(seed0 + i)
-        net = create_net(algo, dims, rho, trial, z_lr_range, rho_sweep=rho_sweep).to(
-            device
-        )
+        net = create_net(
+            algo,
+            dims,
+            rho,
+            trial,
+            z_lr_range,
+            rho_sweep=rho_sweep,
+            per_layer_rho=per_layer_rho,
+        ).to(device)
 
         lr = trial.suggest_float("lr", *lr_range, log=True)
         if lr_decay_range is not None:
@@ -201,6 +214,12 @@ if __name__ == "__main__":
         nargs=2,
         default=None,
         help="sweep range for rho; default: don't sweep, use value from --rho",
+    )
+    parser.add_argument(
+        "--per-layer-rho",
+        action="store_true",
+        default=False,
+        help="use different rho for each layer; only used for sweep",
     )
     parser.add_argument(
         "--no-lr-decay", action="store_true", default=False, help="fix lr_decay to 0"
@@ -293,6 +312,7 @@ if __name__ == "__main__":
             Q_lrf_range=args.Q_lrf,
             Wa_lrf_range=args.Wa_lrf,
             rho_sweep=args.rho_sweep,
+            per_layer_rho=args.per_layer_rho,
             device=device,
         ),
         n_trials=args.trials,
