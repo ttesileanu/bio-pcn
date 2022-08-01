@@ -196,10 +196,20 @@ for dataset in tqdm(all_datasets, desc="dataset"):
 # %%
 
 max_batches = {_: 3000 for _ in all_histories}
+# figsize = None
+# figsize = (2.75, 2.00)
+figsize = (1.3, 1.0)
 for dataset, histories in all_histories.items():
-    fig, ax = make_plot(histories, max_batch=max_batches[dataset])
+    extra_args = {} if figsize is None else {"figsize": figsize}
+    fig, ax = make_plot(histories, max_batch=max_batches[dataset], **extra_args)
+    if dataset == "lfw":
+        ax.yaxis.set_minor_formatter(mpl.ticker.FuncFormatter(lambda y, _: f"{y:g}"))
     # ax.set_title(dataset)
-    fig.savefig(osp.join(fig_path, f"extra_{dataset}_pc_loss.pdf"))
+    if figsize is None:
+        figsize_str = ""
+    else:
+        figsize_str = "_" + "_".join(str(_) for _ in figsize)
+    fig.savefig(osp.join(fig_path, f"extra_{dataset}_pc_loss{figsize_str}.pdf"))
 
 # %%
 
