@@ -43,6 +43,7 @@ def mock_net():
         z=[torch.FloatTensor([0.0])], y_pred=torch.FloatTensor([0.0])
     )
     net.pc_loss.return_value = torch.tensor(0.0)
+    net.parameters.return_value = [torch.tensor([0.0])]
 
     return net
 
@@ -525,6 +526,7 @@ def test_custom_metric_stores_values(trainer, field, val_loader):
     net = Mock()
     net.W = torch.FloatTensor([[0.3, 0.5], [-0.2, 0.1]])
     net.relax.side_effect = lambda x, y: SimpleNamespace(z=[2 * x, x.T @ y])
+    net.parameters.return_value = [torch.tensor([0.0])]
     trainer.metrics = {"custom": custom_metric}
 
     for batch in trainer(10):
@@ -554,6 +556,7 @@ def trainer_with_meld() -> SimpleNamespace:
     a = x.clone()
     b = torch.hstack((x.clone(), y.clone()))
     net.relax.return_value = SimpleNamespace(z=[a, b], y_pred=torch.FloatTensor([0.0]))
+    net.parameters.return_value = [torch.tensor([0.0])]
 
     n = 3
     for batch in trainer(n):
@@ -724,6 +727,7 @@ def test_trainer_report_batch_reports_correct_epochs(trainer):
     a = x.clone()
     b = torch.hstack((x.clone(), y.clone()))
     net.relax.return_value = SimpleNamespace(z=[a, b], y_pred=torch.FloatTensor([0.0]))
+    net.parameters.return_value = [torch.tensor([0.0])]
 
     n = len(trainer)
     k = 3
