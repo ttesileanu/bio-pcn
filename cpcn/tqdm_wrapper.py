@@ -40,7 +40,7 @@ def tqdmw(train_it: Iterable, tqdm=tqdm) -> Iterable:
 
                 # make this robust -- would prefer to not fail due to progress bar
                 try:
-                    last_val = float(validation[metric][-1])
+                    last_val = float(validation[metric][-1].item())
                     progress_str = f"{last_val:.3g}"
                 except:
                     progress_str = "???"
